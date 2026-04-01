@@ -1,0 +1,17 @@
+.git
+.github
+.client-conda-env
+build
+dist
+dist-debug
+client_data
+downloads
+logs
+backup_config
+tmp*
+__pycache__
+*.pyc
+*.pyo
+*.log
+.pytest_cache
+.mypy_cache

@@ -1,0 +1,27 @@
+[project]
+name = "DouyinLiveRecorder-4.0.7"
+workspace_root = "E:/Project/DouyinLiveRecorder-4.0.7"
+primary_language = "python"
+
+[recovery]
+must_read = [
+  "AGENTS.md",
+  "docs/architecture/overview.md",
+  "docs/handover/current_status.md",
+  "docs/handover/next_steps.md",
+  "docs/handover/known_issues.md",
+  "CLIENT_TASK_TRACKER.md",
+  "CLIENT_RELEASE.md"
+]
+session_dir = "docs/sessions"
+wrapup_prompt = "prompts/session_wrapup_prompt.md"
+recovery_prompt = "prompts/recovery_prompt.md"
+unknowns_policy = "Never invent missing history; mark conclusions as ??? / ?? / ???."
+
+[commands]
+client_test = "& '.\.client-conda-env\python.exe' -m unittest discover -s client\tests -v"
+compile_check = "& '.\.client-conda-env\python.exe' -m py_compile main.py client\main.py client\bootstrap.py"
+client_run = "./start_client.ps1"
+legacy_run = "& '.\.client-conda-env\python.exe' main.py"
+client_build = "./build_client_release.ps1"
+docker_up = "docker compose -f docker-compose.flyinnas.yaml up -d --build"
