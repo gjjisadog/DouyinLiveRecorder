@@ -86,6 +86,7 @@ class ConfigService(LogEmitterMixin):
                 "\u539f\u753b|\u8d85\u6e05|\u9ad8\u6e05|\u6807\u6e05|\u6d41\u7545",
                 "\u539f\u753b",
             ),
+            max_file_size_gb=1.0,
             max_concurrency=int(
                 self._get(
                     parser,
@@ -355,6 +356,7 @@ class ConfigService(LogEmitterMixin):
             "output_dir": str(config.output_dir),
             "output_format": config.output_format.value,
             "quality": config.quality,
+            "max_file_size_gb": config.max_file_size_gb,
             "max_concurrency": config.max_concurrency,
             "loop_seconds": config.loop_seconds,
             "queue_seconds": config.queue_seconds,
@@ -399,6 +401,7 @@ class ConfigService(LogEmitterMixin):
             output_dir=output_dir,
             output_format=output_format,
             quality=str(payload.get("quality") or "\u539f\u753b"),
+            max_file_size_gb=float(payload.get("max_file_size_gb", 1.0)),
             max_concurrency=int(payload.get("max_concurrency", 3)),
             loop_seconds=int(payload.get("loop_seconds", 300)),
             queue_seconds=int(payload.get("queue_seconds", 0)),

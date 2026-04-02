@@ -4,6 +4,7 @@ import shutil
 import tarfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from client.infra.docker.flyinnas_deploy import (
@@ -15,6 +16,7 @@ from client.infra.docker.flyinnas_deploy import (
     deploy_over_ssh,
     normalize_remote_dir,
     render_remote_script,
+    run_command,
 )
 
 
@@ -120,6 +122,19 @@ class FlyInNasDeployTests(unittest.TestCase):
             ],
             ssh_command[-9:],
         )
+
+    def test_run_command_sends_utf8_bytes_with_lf_when_input_present(self) -> None:
+        captured_kwargs = {}
+
+        def fake_run(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return None
+
+        with patch("client.infra.docker.flyinnas_deploy.subprocess.run", side_effect=fake_run):
+            run_command(["ssh", "host"], input_text="#!/bin/sh\nset -eu\n")
+
+        self.assertEqual(b"#!/bin/sh\nset -eu\n", captured_kwargs["input"])
+        self.assertFalse(captured_kwargs["text"])
 
 
 if __name__ == "__main__":

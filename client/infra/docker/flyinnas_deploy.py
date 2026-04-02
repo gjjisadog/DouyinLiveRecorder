@@ -176,14 +176,24 @@ def run_command(
     *,
     cwd: Path | None = None,
     input_text: str | None = None,
-) -> subprocess.CompletedProcess[str]:
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    run_kwargs = {
+        "cwd": str(cwd) if cwd is not None else None,
+        "capture_output": False,
+        "check": True,
+    }
+    if input_text is None:
+        return subprocess.run(
+            command,
+            text=True,
+            **run_kwargs,
+        )
+    # Keep LF line endings when piping the remote shell script over SSH from Windows.
     return subprocess.run(
         command,
-        cwd=str(cwd) if cwd is not None else None,
-        input=input_text,
-        capture_output=False,
-        text=True,
-        check=True,
+        input=input_text.replace("\r\n", "\n").encode("utf-8"),
+        text=False,
+        **run_kwargs,
     )
 
 

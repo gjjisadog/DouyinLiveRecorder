@@ -54,12 +54,21 @@
   3. 后续最小提交基线
 
 ## 本次未完成
-- 没有直接执行 `git add` / `git commit`，因为这会真正写入一个新基线，属于需要明确决策的动作。
-- 没有处理 `deploy/`、`tmp7qf85p61/`、`tmpbape0idz/` 的物理删除。
+- 未能处理 `tmp7qf85p61/`、`tmpbape0idz/` 的物理删除；当前会话下 `Remove-Item`、`rd /s /q`、`takeown`、`icacls` 均返回 `Access is denied`。
+
+## 补记（2026-04-02）
+- 已在用户明确授权后执行首个恢复提交：
+  - commit: `8152c4e`
+  - message: `chore: restore client recovery baseline and validation records`
+- 当前可确认：
+  - 本地 Git 基线已建立，不再是“零提交仓库”。
+  - 但上游历史、远端仓库与原始 branch 关系仍无法从当前仓库本地恢复。
+- 物理清理补充：
+  - `deploy/` 空目录已删除。
+  - `tmp7qf85p61/`、`tmpbape0idz/` 依旧存在 ACL 拒绝访问问题，需要更高权限会话或宿主机手工处理。
 
 ## 结论
-- `BL-008` 已完成“基线恢复前半段”：Git 现场已被澄清，源码范围与产物范围已被明确。
-- 下一步如果要真正建立可持续的 Git 基线，建议顺序是：
-  1. 先清掉确认无用的孤儿目录
-  2. 再按“源码 / 文档 / 模板 / 脚本”建立首个最小提交基线
-  3. 之后所有变更再基于这个新基线推进
+- `BL-008` 已完成“Git 基线恢复”主体工作：Git 现场已澄清，纳管边界已明确，且首个恢复提交已经建立。
+- 后续只剩两个尾项：
+  1. 处理 `tmp7qf85p61/`、`tmpbape0idz/` 的 ACL 异常目录
+  2. 如需继续接回上游历史，再单独确认 remote / branch 映射关系

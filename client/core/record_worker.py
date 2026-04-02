@@ -68,8 +68,13 @@ class RecordWorker(LogEmitterMixin):
         self._emit_log(f"任务 {task.task_id} 已停止。", LEVEL_INFO)
 
     def sync_task(self, task: RecordTask) -> bool:
-        if task.task_id not in self.sessions:
+        session = self.sessions.get(task.task_id)
+        if session is None:
             return False
+
+        if self.ffmpeg_service.is_session_over_size_limit(session, self.config):
+            self._rollover_task(task, session)
+            return True
 
         return_code = self.ffmpeg_service.poll_record(task.task_id)
         if return_code is None:
@@ -100,3 +105,29 @@ class RecordWorker(LogEmitterMixin):
         for task in tasks:
             changed = self.sync_task(task) or changed
         return changed
+
+    def _rollover_task(self, task: RecordTask, session: RecordSession) -> None:
+        output_file = session.output_file
+        self._emit_log(
+            f"任务 {task.task_id} 的录制文件已达到单文件上限，准备自动切换新文件。",
+            LEVEL_INFO,
+        )
+        self.ffmpeg_service.stop_record(task)
+        self.sessions.pop(task.task_id, None)
+        if self.history_service is not None:
+            self.history_service.record_finished(task, TaskStatus.COMPLETED)
+
+        try:
+            self.start(task, config=self.config)
+            self._emit_log(
+                f"任务 {task.task_id} 已自动切换到新的录制文件。上一段：{output_file}",
+                LEVEL_INFO,
+            )
+        except Exception as exc:
+            task.last_error = str(exc)
+            if task.status == TaskStatus.PENDING:
+                task.status = TaskStatus.FAILED
+            self._emit_log(
+                f"任务 {task.task_id} 在按大小切段后重启失败：{exc}",
+                LEVEL_ERROR,
+            )

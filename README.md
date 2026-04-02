@@ -124,6 +124,7 @@
 - 另外，如果需要录制TikTok、AfreecaTV等海外平台，请在配置文件中设置开启代理并添加proxy_addr链接 如：`127.0.0.1:7890` （这只是示例地址，具体根据实际填写）。
 - 建议把仓库里的 `config/config.example.ini`、`config/URL_config.example.ini` 作为公开样板；本地真实使用时复制为 `config/config.ini`、`config/URL_config.ini` 后再填写自己的 Cookie、推送 token、账号密码与直播间地址。
 - `config/config.ini` 可能包含 Cookie、推送接口、SMTP 授权码、平台账号密码等敏感信息；共享仓库、截图或日志前请先脱敏。
+- 如需校验公开样板没有落后于真实配置，可执行 `& '.\.client-conda-env\python.exe' scripts/check_config_examples.py`。
 
 - 假如`URL_config.ini`文件中添加的直播间地址，有个别直播间暂时不想录制又不想移除链接，可以在对应直播间的链接开头加上`#`，那么将停止该直播间的监测以及录制。
 

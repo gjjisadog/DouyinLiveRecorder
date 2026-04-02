@@ -23,6 +23,7 @@ SOURCE_TASK_STORE = "task_store"
 SOURCE_HISTORY = "history"
 SOURCE_SCHEDULER = "scheduler"
 SOURCE_NOTIFICATION = "notification"
+SOURCE_AUTOMATION = "automation"
 
 LEVEL_LABELS: dict[str, str] = {
     LEVEL_ALL: "全部级别",
@@ -45,6 +46,7 @@ SOURCE_LABELS: dict[str, str] = {
     SOURCE_HISTORY: "历史记录",
     SOURCE_SCHEDULER: "调度器",
     SOURCE_NOTIFICATION: "通知服务",
+    SOURCE_AUTOMATION: "自动化桥接",
 }
 
 SOURCE_PREFIXES: dict[str, str] = {
@@ -58,6 +60,7 @@ SOURCE_PREFIXES: dict[str, str] = {
     "[历史]": SOURCE_HISTORY,
     "[调度]": SOURCE_SCHEDULER,
     "[通知]": SOURCE_NOTIFICATION,
+    "[自动化]": SOURCE_AUTOMATION,
     "[系统]": SOURCE_SYSTEM,
 }
 
@@ -73,6 +76,7 @@ KNOWN_SOURCES: tuple[str, ...] = (
     SOURCE_HISTORY,
     SOURCE_SCHEDULER,
     SOURCE_NOTIFICATION,
+    SOURCE_AUTOMATION,
 )
 
 

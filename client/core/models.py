@@ -12,6 +12,7 @@ class AppConfig:
     output_dir: Path = Path("downloads")
     output_format: OutputFormat = OutputFormat.TS
     quality: str = "原画"
+    max_file_size_gb: float = 1.0
     max_concurrency: int = 3
     loop_seconds: int = 300
     queue_seconds: int = 0

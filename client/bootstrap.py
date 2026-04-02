@@ -67,6 +67,7 @@ from client.core.stream_resolver import StreamResolver
 from client.core.task_persistence import TaskPersistenceService
 from client.infra.env.dependency_checker import DependencyChecker
 from client.infra.logging.log_service import LEVEL_INFO, LEVEL_WARNING, LogBuffer, LogHandler, SOURCE_SYSTEM
+from client.infra.process.automation_bridge import AutomationBridge
 from client.infra.process.desktop_runtime import DesktopRuntimeService, build_startup_command
 from client.infra.storage.storage_strategy import StorageStrategyService
 from client.ui.main_window import MainWindow
@@ -188,6 +189,10 @@ def run() -> int:
         startup_state=startup_state,
     )
     app.aboutToQuit.connect(window._shutdown_for_exit)
+    automation_bridge = AutomationBridge.from_env(handler=window, log_handler=window.logs_page.append_log)
+    if automation_bridge is not None:
+        automation_bridge.start(app)
+        window.attach_automation_bridge(automation_bridge)
     startup_log_buffer.flush_to(window.logs_page.append_log)
     window.show()
     return app.exec()

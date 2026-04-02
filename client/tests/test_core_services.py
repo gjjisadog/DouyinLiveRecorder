@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 from pathlib import Path
+import shutil
 from unittest.mock import Mock, patch
 
 from client.core.enums import OutputFormat, Platform, TaskStatus
@@ -131,6 +132,7 @@ class RecordWorkerTests(unittest.TestCase):
     def test_sync_task_updates_completed_and_failed_statuses(self) -> None:
         resolver = Mock()
         ffmpeg_service = Mock()
+        ffmpeg_service.is_session_over_size_limit.return_value = False
         history = Mock()
         worker = RecordWorker(
             stream_resolver=resolver,
@@ -154,6 +156,55 @@ class RecordWorkerTests(unittest.TestCase):
         self.assertEqual(TaskStatus.FAILED, failed_task.status)
         self.assertIn("code 2", failed_task.last_error)
         history.record_finished.assert_any_call(failed_task, TaskStatus.FAILED, failed_task.last_error)
+
+    def test_sync_task_rolls_over_when_file_size_limit_is_hit(self) -> None:
+        stream = StreamInfo(is_live=True, title="新分段", record_url="https://example.com/live.m3u8")
+        old_session = RecordSession(
+            task_id="task-105",
+            started_at=datetime(2026, 3, 31, 12, 0, 0),
+            process_id=1001,
+            output_file=Path("downloads/old.ts"),
+            command=["ffmpeg"],
+        )
+        new_session = RecordSession(
+            task_id="task-105",
+            started_at=datetime(2026, 3, 31, 12, 5, 0),
+            process_id=1002,
+            output_file=Path("downloads/new.ts"),
+            command=["ffmpeg"],
+        )
+        resolver = Mock()
+        resolver.resolve_task.return_value = stream
+        ffmpeg_service = Mock()
+        ffmpeg_service.is_session_over_size_limit.return_value = True
+        ffmpeg_service.build_command.return_value = (["ffmpeg"], Path("downloads/new.ts"))
+        ffmpeg_service.start_record.return_value = new_session
+        history = Mock()
+        worker = RecordWorker(
+            stream_resolver=resolver,
+            ffmpeg_service=ffmpeg_service,
+            config=AppConfig(max_file_size_gb=1.0),
+            history_service=history,
+        )
+        task = RecordTask(
+            task_id="task-105",
+            url="https://live.example.com/rollover",
+            status=TaskStatus.RUNNING,
+            output_path=Path("downloads/old.ts"),
+            display_name="主播 A",
+        )
+        worker.sessions[task.task_id] = old_session
+
+        changed = worker.sync_task(task)
+
+        self.assertTrue(changed)
+        ffmpeg_service.stop_record.assert_called_once_with(task)
+        history.record_finished.assert_called_once_with(task, TaskStatus.COMPLETED)
+        history.record_started.assert_called_once_with(task, new_session)
+        self.assertEqual(TaskStatus.RUNNING, task.status)
+        self.assertEqual(Path("downloads/new.ts"), task.output_path)
+        self.assertEqual("新分段", task.title)
+        self.assertEqual(new_session, worker.sessions[task.task_id])
 
 
 class FfmpegServiceTests(unittest.TestCase):
@@ -199,6 +250,22 @@ class FfmpegServiceTests(unittest.TestCase):
         selected = service.select_source_url(task, stream)
 
         self.assertEqual("https://example.com/live.flv?codec=h264", selected)
+
+    def test_is_session_over_size_limit_checks_output_file_size(self) -> None:
+        workspace = Path("tmp_ffmpeg_size_limit_test")
+        workspace.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, workspace, True)
+        output_file = workspace / "segment.ts"
+        output_file.write_bytes(b"a" * 1024)
+        session = RecordSession(
+            task_id="task-203",
+            started_at=datetime.now(),
+            output_file=output_file,
+        )
+        service = FfmpegService()
+
+        self.assertTrue(service.is_session_over_size_limit(session, AppConfig(max_file_size_gb=0.0000005)))
+        self.assertFalse(service.is_session_over_size_limit(session, AppConfig(max_file_size_gb=1.0)))
 
 
 class NotificationServiceTests(unittest.TestCase):

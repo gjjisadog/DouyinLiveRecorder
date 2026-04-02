@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import traceback
+from typing import Any
+
 from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QIcon
 from PySide6.QtWidgets import (
@@ -25,7 +28,7 @@ from client.core.notification_service import NotificationService
 from client.core.record_manager import RecordManager
 from client.core.scheduler import Scheduler
 from client.core.task_persistence import TaskPersistenceService
-from client.infra.logging.log_service import LEVEL_ERROR, LEVEL_INFO, LEVEL_WARNING, SOURCE_MAIN_WINDOW
+from client.infra.logging.log_service import LEVEL_ERROR, LEVEL_INFO, LEVEL_WARNING, SOURCE_AUTOMATION, SOURCE_MAIN_WINDOW
 from client.infra.process.desktop_runtime import DesktopRuntimeService, DesktopRuntimeState
 from client.ui.pages.history_page import HistoryPage
 from client.ui.pages.logs_page import LogsPage
@@ -74,6 +77,7 @@ class MainWindow(QMainWindow):
         self._allow_close = False
         self._shutdown_completed = False
         self._tray_message_shown = False
+        self._automation_bridge = None
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.setInterval(1000)
         self._scheduler_timer.timeout.connect(self._on_scheduler_timer)
@@ -208,6 +212,155 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str, level: str) -> None:
         self.logs_page.append_log(message, level, SOURCE_MAIN_WINDOW)
+
+    def attach_automation_bridge(self, bridge: object) -> None:
+        self._automation_bridge = bridge
+
+    def handle_automation_command(self, command: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = payload or {}
+        normalized = command.strip().lower()
+
+        if normalized == "ping":
+            return self._automation_snapshot()
+        if normalized == "get_state":
+            return self._automation_snapshot(include_history=True)
+        if normalized == "list_tasks":
+            self._refresh_automation_tasks()
+            return {"tasks": [self._serialize_task_for_automation(task) for task in self.tasks_page.viewmodel.tasks]}
+        if normalized == "list_history":
+            return {"records": self._list_history_for_automation()}
+        if normalized == "add_task":
+            result = self.tasks_page.viewmodel.save_task(
+                {
+                    "url": str(request.get("url") or "").strip(),
+                    "display_name": str(request.get("display_name") or "").strip(),
+                    "quality": str(request.get("quality") or self.tasks_page.viewmodel.default_quality(self.record_manager)).strip(),
+                    "enabled": bool(request.get("enabled", True)),
+                },
+                task_persistence=self.task_persistence,
+                record_manager=self.record_manager,
+            )
+            if result.refresh:
+                self.tasks_page.refresh_table(result.selected_task_id)
+            task = self.tasks_page.viewmodel.get_task(result.selected_task_id) if result.selected_task_id else None
+            self.logs_page.append_log(f"自动化新增任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "task": self._serialize_task_for_automation(task) if task is not None else None,
+            }
+        if normalized == "start_task":
+            task_id = str(request.get("task_id") or "").strip()
+            result = self.tasks_page.viewmodel.start_task(task_id, record_manager=self.record_manager)
+            if result.refresh:
+                self.tasks_page.refresh_table(result.selected_task_id)
+            self.logs_page.append_log(f"自动化启动任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            task = self.tasks_page.viewmodel.get_task(task_id)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "task": self._serialize_task_for_automation(task) if task is not None else None,
+            }
+        if normalized == "start_task_debug":
+            task_id = str(request.get("task_id") or "").strip()
+            task = self.tasks_page.viewmodel.get_task(task_id)
+            try:
+                if self.record_manager is None:
+                    raise RuntimeError("record_manager is not connected")
+                self.record_manager.start_task(task_id)
+                self.tasks_page.refresh_table(task_id)
+                return {
+                    "ok": True,
+                    "task": self._serialize_task_for_automation(task) if task is not None else None,
+                }
+            except Exception as exc:
+                if task is not None:
+                    task.last_error = str(exc)
+                    self.tasks_page.refresh_table(task.task_id)
+                return {
+                    "ok": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                    "task": self._serialize_task_for_automation(task) if task is not None else None,
+                }
+        if normalized == "stop_task":
+            task_id = str(request.get("task_id") or "").strip()
+            result = self.tasks_page.viewmodel.stop_task(task_id, record_manager=self.record_manager)
+            if result.refresh:
+                self.tasks_page.refresh_table(result.selected_task_id)
+            self.logs_page.append_log(f"自动化停止任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            task = self.tasks_page.viewmodel.get_task(task_id)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "task": self._serialize_task_for_automation(task) if task is not None else None,
+            }
+        if normalized == "shutdown":
+            self.logs_page.append_log("自动化请求关闭客户端。", LEVEL_INFO, SOURCE_AUTOMATION)
+            self._allow_close = True
+            QTimer.singleShot(0, self.close)
+            return {"scheduled": True}
+
+        raise ValueError(f"unsupported automation command: {command}")
+
+    def _refresh_automation_tasks(self) -> None:
+        if self.record_manager is not None and self.record_manager.sync_task_states():
+            self.tasks_page.refresh_table()
+
+    def _automation_snapshot(self, *, include_history: bool = False) -> dict[str, Any]:
+        self._refresh_automation_tasks()
+        payload: dict[str, Any] = {
+            "visible": self.isVisible(),
+            "current_tab_index": self.tabs.currentIndex(),
+            "task_count": len(self.tasks_page.viewmodel.tasks),
+            "tasks": [self._serialize_task_for_automation(task) for task in self.tasks_page.viewmodel.tasks],
+        }
+        if include_history:
+            payload["history_records"] = self._list_history_for_automation()
+        return payload
+
+    def _list_history_for_automation(self) -> list[dict[str, Any]]:
+        if self.history_service is None:
+            return []
+        return [self._serialize_history_for_automation(record) for record in self.history_service.list_all()]
+
+    def _serialize_task_for_automation(self, task) -> dict[str, Any]:
+        return {
+            "task_id": task.task_id,
+            "url": task.url,
+            "platform": task.platform.value,
+            "quality": task.quality,
+            "enabled": task.enabled,
+            "display_name": task.display_name,
+            "anchor_name": task.anchor_name,
+            "title": task.title,
+            "status": task.status.value,
+            "output_path": str(task.output_path) if task.output_path is not None else None,
+            "last_error": task.last_error,
+        }
+
+    def _serialize_history_for_automation(self, record) -> dict[str, Any]:
+        return {
+            "task_id": record.task_id,
+            "status": record.status.value,
+            "platform": record.platform.value,
+            "display_name": record.display_name,
+            "title": record.title,
+            "file_path": str(record.file_path) if record.file_path is not None else None,
+            "started_at": record.started_at.isoformat() if record.started_at is not None else None,
+            "finished_at": record.finished_at.isoformat() if record.finished_at is not None else None,
+            "error_message": record.error_message,
+        }
+
+    def _serialize_action_result_for_automation(self, result) -> dict[str, Any]:
+        return {
+            "ok": result.ok,
+            "message": result.message,
+            "level": result.level,
+            "status_message": result.status_message,
+            "status_timeout": result.status_timeout,
+            "refresh": result.refresh,
+            "selected_task_id": result.selected_task_id,
+            "dialog_title": result.dialog_title,
+            "dialog_message": result.dialog_message,
+        }
 
     def _setup_notifications(self) -> None:
         if QSystemTrayIcon.isSystemTrayAvailable():

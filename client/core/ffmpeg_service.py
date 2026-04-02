@@ -165,6 +165,13 @@ class FfmpegService(LogEmitterMixin):
     def is_recording(self, task_id: str) -> bool:
         return self.poll_record(task_id) is None
 
+    def is_session_over_size_limit(self, session: RecordSession, config: AppConfig) -> bool:
+        max_bytes = self._max_file_size_bytes(config)
+        output_file = session.output_file
+        if max_bytes is None or output_file is None or not output_file.exists():
+            return False
+        return output_file.stat().st_size >= max_bytes
+
     def build_output_path(self, task: RecordTask, stream: StreamInfo, config: AppConfig) -> Path:
         anchor_name = self.clean_name(task.display_name or task.anchor_name or task.task_id, config.clean_emoji)
         title_name = self.clean_name(stream.title or task.title or "", config.clean_emoji)
@@ -280,6 +287,11 @@ class FfmpegService(LogEmitterMixin):
         else:
             args.extend(["-f", "mpegts"])
         return args + [str(output_file)]
+
+    def _max_file_size_bytes(self, config: AppConfig) -> int | None:
+        if config.max_file_size_gb <= 0:
+            return None
+        return max(int(config.max_file_size_gb * 1024 * 1024 * 1024), 1)
 
     def _get_startup_info(self) -> subprocess.STARTUPINFO | None:
         if not WINDOWS:
