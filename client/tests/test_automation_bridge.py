@@ -26,6 +26,7 @@ from client.viewmodels.task_viewmodel import TaskViewModel
 class _FakeRecordManager:
     def __init__(self, tasks: list[RecordTask]) -> None:
         self.tasks = {task.task_id: task for task in tasks}
+        self.config = AppConfig()
         self.log_handler = None
 
     def set_log_handler(self, handler) -> None:
@@ -137,6 +138,59 @@ class AutomationBridgeTests(unittest.TestCase):
         list_response = window.handle_automation_command("list_tasks")
         self.assertEqual(1, len(list_response["tasks"]))
         self.assertEqual(task_id, list_response["tasks"][0]["task_id"])
+
+    def test_main_window_automation_edit_delete_import_export_logs_and_tabs(self) -> None:
+        root = self.make_workspace("tmp_automation_window_ops")
+        window = self.create_window(root)
+
+        add_response = window.handle_automation_command(
+            "add_task",
+            {
+                "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                "display_name": "Automation_Edit",
+                "quality": "鍘熺敾",
+                "enabled": True,
+            },
+        )
+        task_id = add_response["task"]["task_id"]
+
+        edit_response = window.handle_automation_command(
+            "edit_task",
+            {
+                "task_id": task_id,
+                "display_name": "Automation_Edited",
+                "enabled": False,
+            },
+        )
+        self.assertTrue(edit_response["result"]["ok"])
+        self.assertEqual("Automation_Edited", edit_response["task"]["display_name"])
+        self.assertFalse(edit_response["task"]["enabled"])
+
+        export_path = root / "exported_tasks.json"
+        export_response = window.handle_automation_command("export_tasks", {"file_path": str(export_path)})
+        self.assertTrue(export_response["result"]["ok"])
+        self.assertTrue(export_path.exists())
+
+        delete_response = window.handle_automation_command("delete_task", {"task_id": task_id})
+        self.assertTrue(delete_response["result"]["ok"])
+        self.assertEqual(0, len(window.tasks_page.viewmodel.tasks))
+
+        import_response = window.handle_automation_command("import_tasks", {"file_path": str(export_path)})
+        self.assertTrue(import_response["result"]["ok"])
+        self.assertEqual(1, len(import_response["tasks"]))
+
+        tabs_response = window.handle_automation_command("list_tabs")
+        self.assertIn("logs", tabs_response["tabs"])
+
+        set_tab_response = window.handle_automation_command("set_current_tab", {"tab": "logs"})
+        self.assertEqual("logs", set_tab_response["current_tab"])
+
+        logs_response = window.handle_automation_command("get_logs", {"keyword": "自动化"})
+        self.assertGreaterEqual(logs_response["count"], 1)
+
+        clear_logs_response = window.handle_automation_command("clear_logs")
+        self.assertTrue(clear_logs_response["cleared"])
+        self.assertEqual(0, window.handle_automation_command("get_logs")["count"])
 
 
 if __name__ == "__main__":

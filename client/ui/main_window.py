@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import traceback
 from typing import Any
 
@@ -39,6 +40,8 @@ from client.viewmodels.task_viewmodel import TaskViewModel
 
 
 class MainWindow(QMainWindow):
+    AUTOMATION_TAB_NAMES = ("tasks", "settings", "history", "logs")
+
     def __init__(
         self,
         settings: AppSettings,
@@ -224,6 +227,34 @@ class MainWindow(QMainWindow):
             return self._automation_snapshot()
         if normalized == "get_state":
             return self._automation_snapshot(include_history=True)
+        if normalized == "list_tabs":
+            return {
+                "tabs": list(self.AUTOMATION_TAB_NAMES),
+                "current_tab_index": self.tabs.currentIndex(),
+                "current_tab": self.AUTOMATION_TAB_NAMES[self.tabs.currentIndex()],
+            }
+        if normalized == "set_current_tab":
+            tab_index = self._resolve_automation_tab_index(request)
+            self.tabs.setCurrentIndex(tab_index)
+            return {
+                "current_tab_index": self.tabs.currentIndex(),
+                "current_tab": self.AUTOMATION_TAB_NAMES[self.tabs.currentIndex()],
+            }
+        if normalized == "get_logs":
+            level = str(request.get("level") or "").strip().lower() or None
+            source = str(request.get("source") or "").strip().lower() or None
+            keyword = str(request.get("keyword") or "")
+            limit = request.get("limit")
+            entries = self.logs_page.snapshot_entries(
+                level=level,
+                source=source,
+                keyword=keyword,
+                limit=int(limit) if limit is not None else None,
+            )
+            return {"entries": entries, "count": len(entries)}
+        if normalized == "clear_logs":
+            self.logs_page.clear_logs()
+            return {"cleared": True, "count": 0}
         if normalized == "list_tasks":
             self._refresh_automation_tasks()
             return {"tasks": [self._serialize_task_for_automation(task) for task in self.tasks_page.viewmodel.tasks]}
@@ -247,6 +278,34 @@ class MainWindow(QMainWindow):
             return {
                 "result": self._serialize_action_result_for_automation(result),
                 "task": self._serialize_task_for_automation(task) if task is not None else None,
+            }
+        if normalized == "edit_task":
+            task_id = str(request.get("task_id") or "").strip()
+            task = self.tasks_page.viewmodel.get_task(task_id)
+            if task is None:
+                raise ValueError(f"task not found: {task_id}")
+            result = self.tasks_page.viewmodel.save_task(
+                {
+                    "url": str(request.get("url") or task.url).strip(),
+                    "display_name": str(request.get("display_name") or task.display_name).strip(),
+                    "quality": str(
+                        request.get("quality")
+                        or task.quality
+                        or self.tasks_page.viewmodel.default_quality(self.record_manager)
+                    ).strip(),
+                    "enabled": bool(request.get("enabled", task.enabled)),
+                },
+                task_persistence=self.task_persistence,
+                record_manager=self.record_manager,
+                task_id=task_id,
+            )
+            if result.refresh:
+                self.tasks_page.refresh_table(result.selected_task_id)
+            updated_task = self.tasks_page.viewmodel.get_task(task_id)
+            self.logs_page.append_log(f"自动化编辑任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "task": self._serialize_task_for_automation(updated_task) if updated_task is not None else None,
             }
         if normalized == "start_task":
             task_id = str(request.get("task_id") or "").strip()
@@ -291,6 +350,48 @@ class MainWindow(QMainWindow):
             return {
                 "result": self._serialize_action_result_for_automation(result),
                 "task": self._serialize_task_for_automation(task) if task is not None else None,
+            }
+        if normalized == "delete_task":
+            task_id = str(request.get("task_id") or "").strip()
+            result = self.tasks_page.viewmodel.delete_task(
+                task_id,
+                task_persistence=self.task_persistence,
+                record_manager=self.record_manager,
+            )
+            if result.refresh:
+                self.tasks_page.refresh_table()
+            self.logs_page.append_log(f"自动化删除任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "deleted_task_id": task_id,
+            }
+        if normalized == "import_tasks":
+            file_path_raw = str(request.get("file_path") or "").strip()
+            if not file_path_raw:
+                raise ValueError("file_path is required")
+            result = self.tasks_page.viewmodel.import_tasks(
+                Path(file_path_raw),
+                task_persistence=self.task_persistence,
+                record_manager=self.record_manager,
+                default_quality=self.tasks_page.viewmodel.default_quality(self.record_manager),
+            )
+            if result.refresh:
+                self.tasks_page.refresh_table(result.selected_task_id)
+            self.logs_page.append_log(f"自动化导入任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "tasks": [self._serialize_task_for_automation(task) for task in self.tasks_page.viewmodel.tasks],
+            }
+        if normalized == "export_tasks":
+            file_path_raw = str(request.get("file_path") or "").strip()
+            if not file_path_raw:
+                raise ValueError("file_path is required")
+            export_path = Path(file_path_raw)
+            result = self.tasks_page.viewmodel.export_tasks(export_path, task_persistence=self.task_persistence)
+            self.logs_page.append_log(f"自动化导出任务请求：{result.message}", result.level, SOURCE_AUTOMATION)
+            return {
+                "result": self._serialize_action_result_for_automation(result),
+                "file_path": str(export_path),
             }
         if normalized == "shutdown":
             self.logs_page.append_log("自动化请求关闭客户端。", LEVEL_INFO, SOURCE_AUTOMATION)
@@ -361,6 +462,21 @@ class MainWindow(QMainWindow):
             "dialog_title": result.dialog_title,
             "dialog_message": result.dialog_message,
         }
+
+    def _resolve_automation_tab_index(self, request: dict[str, Any]) -> int:
+        if "index" in request and request.get("index") is not None:
+            tab_index = int(request["index"])
+        else:
+            tab_name = str(request.get("tab") or "").strip().lower()
+            if not tab_name:
+                raise ValueError("tab or index is required")
+            try:
+                tab_index = self.AUTOMATION_TAB_NAMES.index(tab_name)
+            except ValueError as exc:
+                raise ValueError(f"unsupported tab: {tab_name}") from exc
+        if tab_index < 0 or tab_index >= self.tabs.count():
+            raise ValueError(f"tab index out of range: {tab_index}")
+        return tab_index
 
     def _setup_notifications(self) -> None:
         if QSystemTrayIcon.isSystemTrayAvailable():

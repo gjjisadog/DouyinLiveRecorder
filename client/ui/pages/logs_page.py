@@ -22,12 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from client.infra.logging.log_service import (
-    KNOWN_SOURCES,
-    LEVEL_ALL,
-    SOURCE_ALL,
-    LogService,
-)
+from client.infra.logging.log_service import KNOWN_SOURCES, LEVEL_ALL, SOURCE_ALL, LogService
 
 
 @dataclass(slots=True)
@@ -114,7 +109,7 @@ class LogsPage(QWidget):
 
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("级别", self))
-        for level in (LEVEL_ALL, *("info", "warning", "error", "debug")):
+        for level in (LEVEL_ALL, "info", "warning", "error", "debug"):
             self.level_filter.addItem(LogService.level_label(level), level)
         self.level_filter.currentIndexChanged.connect(self._refresh_view)
         filter_row.addWidget(self.level_filter)
@@ -144,6 +139,7 @@ class LogsPage(QWidget):
         self.summary_label.setText("当前无日志。")
         self.summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         status_row.addWidget(self.summary_label, 2)
+
         self.stats_label.setText("统计：暂无。")
         self.stats_label.setStyleSheet("color: #6B7280;")
         self.stats_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -171,6 +167,35 @@ class LogsPage(QWidget):
         self.stats_label.setText("统计：暂无。")
         self.status_requested.emit("日志已清空。", 2500)
 
+    def snapshot_entries(
+        self,
+        *,
+        level: str | None = None,
+        source: str | None = None,
+        keyword: str = "",
+        limit: int | None = None,
+    ) -> list[dict[str, str]]:
+        entries = self._entries
+        normalized_keyword = keyword.strip().lower()
+        if level and level != LEVEL_ALL:
+            entries = [entry for entry in entries if entry.level == level]
+        if source and source != SOURCE_ALL:
+            entries = [entry for entry in entries if entry.source == source]
+        if normalized_keyword:
+            entries = [entry for entry in entries if normalized_keyword in entry.display_text.lower()]
+        if limit is not None and limit >= 0:
+            entries = entries[-limit:]
+        return [
+            {
+                "timestamp": entry.timestamp,
+                "level": entry.level,
+                "source": entry.source,
+                "message": entry.message,
+                "display_text": entry.display_text,
+            }
+            for entry in entries
+        ]
+
     def clear_filters(self) -> None:
         self.level_filter.setCurrentIndex(self.level_filter.findData(LEVEL_ALL))
         self.source_filter.setCurrentIndex(self.source_filter.findData(SOURCE_ALL))
@@ -179,8 +204,7 @@ class LogsPage(QWidget):
         self.status_requested.emit("日志筛选条件已清空。", 2500)
 
     def copy_visible_logs(self) -> None:
-        visible_text = self._visible_text()
-        QApplication.clipboard().setText(visible_text)
+        QApplication.clipboard().setText(self._visible_text())
         self.status_requested.emit("当前日志已复制到剪贴板。", 2500)
 
     def export_logs(self) -> None:
@@ -189,7 +213,7 @@ class LogsPage(QWidget):
             self,
             "导出日志",
             str(Path(default_name)),
-            "日志文件 (*.log);;文本文件 (*.txt);;所有文件 (*)",
+            "日志文件 (*.log);;文本文件 (*.txt);;所有文件(*)",
         )
         if not file_path:
             return
@@ -206,12 +230,14 @@ class LogsPage(QWidget):
             scroll_bar.setValue(scroll_bar.maximum())
         else:
             scroll_bar.setValue(min(previous_position, scroll_bar.maximum()))
+
         total_count = len(self._entries)
         visible_count = len(entries)
         if total_count == 0:
             self.summary_label.setText("当前无日志。")
             self.stats_label.setText("统计：暂无。")
             return
+
         source_count = len({entry.source for entry in self._entries})
         self.summary_label.setText(f"共 {total_count} 条日志，当前显示 {visible_count} 条，来源 {source_count} 个。")
         self.stats_label.setText(self._build_stats_text(entries))
@@ -230,8 +256,7 @@ class LogsPage(QWidget):
         return entries
 
     def _visible_text(self) -> str:
-        entries = self._filtered_entries()
-        return "\n".join(entry.display_text for entry in entries)
+        return "\n".join(entry.display_text for entry in self._filtered_entries())
 
     def _build_source_stats_text(self, entries: list[LogEntry]) -> str:
         if not entries:
@@ -259,11 +284,7 @@ class LogsPage(QWidget):
             counts[entry.level] = counts.get(entry.level, 0) + 1
 
         ordered_levels = ("error", "warning", "info", "debug")
-        parts = [
-            f"{LogService.level_label(level)} {counts[level]}"
-            for level in ordered_levels
-            if counts.get(level)
-        ]
+        parts = [f"{LogService.level_label(level)} {counts[level]}" for level in ordered_levels if counts.get(level)]
         return "级别：" + " · ".join(parts)
 
     def _build_stats_text(self, entries: list[LogEntry]) -> str:
