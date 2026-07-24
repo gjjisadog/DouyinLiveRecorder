@@ -15,6 +15,12 @@ AUTOMATION_ENV = "DLR_AUTOMATION_DIR"
 DEFAULT_STREAM_URL = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
 
 
+def write_json_atomically(path: Path, payload: dict) -> None:
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run packaged client acceptance via automation bridge.")
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -23,6 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stream-url", default=DEFAULT_STREAM_URL)
     parser.add_argument("--display-name", default="BL002_EXE_Automation")
     parser.add_argument("--record-seconds", type=int, default=8)
+    parser.add_argument("--max-file-size-gb", type=float, default=1.0)
+    parser.add_argument("--split-seconds", type=int, default=1800)
+    parser.add_argument("--loop-seconds", type=int, default=300)
+    parser.add_argument("--poll-interval", type=float, default=1.0)
+    parser.add_argument("--log-limit", type=int, default=50)
     parser.add_argument("--startup-timeout", type=int, default=30)
     parser.add_argument("--command-timeout", type=int, default=20)
     return parser.parse_args()
@@ -31,7 +42,9 @@ def parse_args() -> argparse.Namespace:
 def detect_ffmpeg_dir() -> Path:
     candidates = [
         Path(os.environ.get("FFMPEG_DIR", "")),
-        Path(r"C:\Users\wxw\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-essentials_build\bin"),
+        Path(
+            r"C:\Users\wxw\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-essentials_build\bin"
+        ),
     ]
     for candidate in candidates:
         if candidate and candidate.exists() and (candidate / "ffmpeg.exe").exists():
@@ -39,10 +52,10 @@ def detect_ffmpeg_dir() -> Path:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path:
         return Path(ffmpeg_path).resolve().parent
-    raise FileNotFoundError("未找到 ffmpeg.exe，请先安装或设置 FFMPEG_DIR")
+    raise FileNotFoundError("ffmpeg.exe not found. Install ffmpeg or set FFMPEG_DIR first.")
 
 
-def prepare_workspace(workspace: Path) -> None:
+def prepare_workspace(workspace: Path, *, max_file_size_gb: float, split_seconds: int, loop_seconds: int) -> None:
     if workspace.exists():
         shutil.rmtree(workspace)
     client_data = workspace / "client_data"
@@ -53,12 +66,12 @@ def prepare_workspace(workspace: Path) -> None:
             "output_dir": str(workspace / "downloads"),
             "output_format": "ts",
             "quality": "原画",
-            "max_file_size_gb": 1.0,
+            "max_file_size_gb": max_file_size_gb,
             "max_concurrency": 3,
-            "loop_seconds": 300,
+            "loop_seconds": loop_seconds,
             "queue_seconds": 0,
             "split_recording": True,
-            "split_seconds": 1800,
+            "split_seconds": split_seconds,
             "use_proxy": False,
             "proxy_url": "",
             "use_https_recording": False,
@@ -110,18 +123,27 @@ def send_command(automation_dir: Path, command: str, payload: dict, timeout_seco
     request_id = uuid.uuid4().hex
     request_path = automation_dir / "request.json"
     response_path = automation_dir / "response.json"
-    request_path.write_text(
-        json.dumps({"id": request_id, "command": command, "payload": payload}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomically(request_path, {"id": request_id, "command": command, "payload": payload})
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if response_path.exists():
-            response = json.loads(response_path.read_text(encoding="utf-8"))
+            try:
+                raw_response = response_path.read_text(encoding="utf-8")
+            except OSError:
+                time.sleep(0.05)
+                continue
+            if not raw_response.strip():
+                time.sleep(0.05)
+                continue
+            try:
+                response = json.loads(raw_response)
+            except json.JSONDecodeError:
+                time.sleep(0.05)
+                continue
             if response.get("request_id") == request_id:
                 return response
         time.sleep(0.2)
-    raise TimeoutError(f"等待自动化响应超时：{command}")
+    raise TimeoutError(f"Timed out waiting for automation response: {command}")
 
 
 def wait_for_task_status(automation_dir: Path, task_id: str, statuses: set[str], timeout_seconds: int) -> dict:
@@ -135,7 +157,7 @@ def wait_for_task_status(automation_dir: Path, task_id: str, statuses: set[str],
             if task["task_id"] == task_id and task["status"] in statuses:
                 return task
         time.sleep(0.5)
-    raise TimeoutError(f"任务 {task_id} 未在 {timeout_seconds}s 内进入状态 {sorted(statuses)}")
+    raise TimeoutError(f"Task {task_id} did not reach {sorted(statuses)} within {timeout_seconds}s")
 
 
 def wait_for_history(automation_dir: Path, task_id: str, timeout_seconds: int) -> dict:
@@ -148,7 +170,7 @@ def wait_for_history(automation_dir: Path, task_id: str, timeout_seconds: int) -
             if record["task_id"] == task_id:
                 return record
         time.sleep(0.5)
-    raise TimeoutError(f"历史记录未在 {timeout_seconds}s 内出现：{task_id}")
+    raise TimeoutError(f"History record did not appear within {timeout_seconds}s: {task_id}")
 
 
 def resolve_output_files(output_pattern: str | None) -> list[Path]:
@@ -169,7 +191,64 @@ def wait_for_output_files(output_pattern: str | None, timeout_seconds: int) -> l
         if output_files:
             return output_files
         time.sleep(0.5)
-    raise TimeoutError(f"录制产物未在 {timeout_seconds}s 内出现：{output_pattern}")
+    raise TimeoutError(f"Recording output did not appear within {timeout_seconds}s: {output_pattern}")
+
+
+def observe_recording(
+    automation_dir: Path,
+    *,
+    task_id: str,
+    record_seconds: int,
+    poll_interval: float,
+    command_timeout: int,
+) -> dict[str, object]:
+    deadline = time.time() + record_seconds
+    task_snapshots: list[dict[str, object]] = []
+    history_counts: list[dict[str, object]] = []
+    output_patterns: list[str] = []
+
+    while time.time() < deadline:
+        elapsed_seconds = round(record_seconds - max(deadline - time.time(), 0), 2)
+
+        list_response = send_command(automation_dir, "list_tasks", {}, timeout_seconds=command_timeout)
+        if not list_response.get("ok"):
+            raise RuntimeError(list_response.get("error") or "list_tasks failed during observation")
+        task = next((item for item in list_response["data"]["tasks"] if item["task_id"] == task_id), None)
+        if task is not None:
+            output_path = task.get("output_path")
+            if output_path:
+                output_patterns.append(str(output_path))
+            task_snapshots.append(
+                {
+                    "elapsed_seconds": elapsed_seconds,
+                    "status": task.get("status"),
+                    "output_path": output_path,
+                    "last_error": task.get("last_error"),
+                }
+            )
+
+        history_response = send_command(automation_dir, "list_history", {}, timeout_seconds=command_timeout)
+        if not history_response.get("ok"):
+            raise RuntimeError(history_response.get("error") or "list_history failed during observation")
+        record_count = sum(1 for record in history_response["data"]["records"] if record["task_id"] == task_id)
+        history_counts.append({"elapsed_seconds": elapsed_seconds, "count": record_count})
+
+        sleep_seconds = min(poll_interval, max(deadline - time.time(), 0))
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+    return {
+        "task_snapshots": task_snapshots,
+        "history_counts": history_counts,
+        "unique_output_patterns": sorted({pattern for pattern in output_patterns if pattern}),
+    }
+
+
+def collect_workspace_output_files(workspace: Path, output_format: str = "ts") -> list[Path]:
+    output_root = workspace / "downloads"
+    if not output_root.exists():
+        return []
+    return sorted(path for path in output_root.rglob(f"*.{output_format}") if path.is_file())
 
 
 def main() -> int:
@@ -178,7 +257,12 @@ def main() -> int:
     workspace = (args.workspace or (repo_root / "tmp_bl002_exe_automation")).resolve()
     exe_path = (args.exe_path or (repo_root / "dist" / "DouyinLiveRecorder Client" / "DouyinLiveRecorder Client.exe")).resolve()
     automation_dir = workspace / "client_data" / "automation"
-    prepare_workspace(workspace)
+    prepare_workspace(
+        workspace,
+        max_file_size_gb=args.max_file_size_gb,
+        split_seconds=args.split_seconds,
+        loop_seconds=args.loop_seconds,
+    )
     automation_dir.mkdir(parents=True, exist_ok=True)
 
     ffmpeg_dir = detect_ffmpeg_dir()
@@ -194,6 +278,11 @@ def main() -> int:
         "exe_path": str(exe_path),
         "ffmpeg_dir": str(ffmpeg_dir),
         "process_id": process.pid,
+        "record_seconds": args.record_seconds,
+        "max_file_size_gb": args.max_file_size_gb,
+        "split_seconds": args.split_seconds,
+        "loop_seconds": args.loop_seconds,
+        "poll_interval": args.poll_interval,
     }
 
     try:
@@ -226,8 +315,13 @@ def main() -> int:
             raise RuntimeError(start_response.get("error") or "start_task failed")
         summary["start_result"] = start_response["data"]
         summary["running_task"] = wait_for_task_status(automation_dir, task_id, {"pending", "running"}, timeout_seconds=20)
-
-        time.sleep(args.record_seconds)
+        summary["observation"] = observe_recording(
+            automation_dir,
+            task_id=task_id,
+            record_seconds=args.record_seconds,
+            poll_interval=args.poll_interval,
+            command_timeout=args.command_timeout,
+        )
 
         stop_response = send_command(
             automation_dir,
@@ -238,13 +332,69 @@ def main() -> int:
         if not stop_response.get("ok"):
             raise RuntimeError(stop_response.get("error") or "stop_task failed")
         summary["stop_result"] = stop_response["data"]
-        summary["stopped_task"] = wait_for_task_status(automation_dir, task_id, {"stopped", "completed", "failed"}, timeout_seconds=20)
+        summary["stopped_task"] = wait_for_task_status(
+            automation_dir,
+            task_id,
+            {"stopped", "completed", "failed"},
+            timeout_seconds=20,
+        )
         summary["history_record"] = wait_for_history(automation_dir, task_id, timeout_seconds=20)
+
+        history_response = send_command(automation_dir, "list_history", {}, timeout_seconds=args.command_timeout)
+        if not history_response.get("ok"):
+            raise RuntimeError(history_response.get("error") or "list_history failed after stop")
+        history_records = [record for record in history_response["data"]["records"] if record["task_id"] == task_id]
+        summary["history_records"] = history_records
+
+        try:
+            logs_response = send_command(
+                automation_dir,
+                "get_logs",
+                {"source": "record", "limit": args.log_limit},
+                timeout_seconds=args.command_timeout,
+            )
+            if logs_response.get("ok"):
+                record_logs = logs_response["data"]["entries"]
+                summary["record_logs"] = record_logs
+            else:
+                record_logs = []
+                summary["record_logs_error"] = logs_response.get("error")
+        except Exception as exc:
+            record_logs = []
+            summary["record_logs_error"] = str(exc)
 
         output_pattern = summary["running_task"].get("output_path")
         output_files = wait_for_output_files(output_pattern, timeout_seconds=10)
         summary["output_pattern"] = output_pattern
         summary["output_files"] = [{"path": str(path), "size": path.stat().st_size} for path in output_files]
+
+        all_output_files = collect_workspace_output_files(workspace)
+        all_output_file_items = [{"path": str(path), "size": path.stat().st_size} for path in all_output_files]
+        summary["all_output_files"] = all_output_file_items
+
+        threshold_bytes = max(int(args.max_file_size_gb * 1024 * 1024 * 1024), 1) if args.max_file_size_gb > 0 else None
+        summary["threshold_bytes"] = threshold_bytes
+        if threshold_bytes is not None and all_output_file_items:
+            overshoot_items = [
+                {
+                    "path": item["path"],
+                    "size": item["size"],
+                    "overshoot_bytes": max(int(item["size"]) - threshold_bytes, 0),
+                }
+                for item in all_output_file_items
+            ]
+            summary["overshoot"] = {
+                "files": overshoot_items,
+                "max_overshoot_bytes": max(item["overshoot_bytes"] for item in overshoot_items),
+            }
+
+        observation = summary["observation"]
+        unique_output_patterns = observation["unique_output_patterns"] if isinstance(observation, dict) else []
+        summary["rollover_detected"] = (
+            len(unique_output_patterns) >= 2
+            or len(history_records) >= 2
+            or any("单文件上限" in str(entry.get("message") or "") for entry in record_logs)
+        )
         if not summary["history_record"].get("file_path"):
             raise RuntimeError("history record missing file_path")
 

@@ -1,5 +1,7 @@
 """Platform routing."""
 
+from urllib.parse import urlsplit
+
 from client.core.enums import Platform
 from client.core.exceptions import PlatformNotSupportedError
 from client.platforms.base import PlatformAdapter
@@ -30,7 +32,8 @@ class PlatformRouter:
 
     def detect_platform(self, url: str) -> Platform:
         lower_url = url.lower()
-        if lower_url.endswith(".m3u8") or lower_url.endswith(".flv"):
+        lower_path = urlsplit(lower_url).path
+        if lower_path.endswith(".m3u8") or lower_path.endswith(".flv"):
             return Platform.DIRECT
 
         for platform, rules in PLATFORM_RULES:

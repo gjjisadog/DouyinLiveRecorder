@@ -17,6 +17,12 @@ from client.infra.logging.log_service import LEVEL_ERROR, LEVEL_INFO, LEVEL_WARN
 AUTOMATION_DIR_ENV = "DLR_AUTOMATION_DIR"
 
 
+def write_json_atomically(path: Path, payload: dict[str, Any]) -> None:
+    temp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
 class AutomationCommandHandler(Protocol):
     def handle_automation_command(self, command: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         ...
@@ -128,6 +134,6 @@ class AutomationBridge(LogEmitterMixin):
             }
             self._emit_log(f"自动化命令处理失败：{exc}", LEVEL_ERROR)
 
-        self.paths.response_path.write_text(json.dumps(response, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomically(self.paths.response_path, response)
         self._last_request_signature = signature
         return True

@@ -15,6 +15,8 @@ from client.infra.logging.log_service import LEVEL_DEBUG, LEVEL_INFO, LogEmitter
 
 INVALID_FILENAME_PATTERN = r"[\/\\\:\*\?\"\<\>\|&# ]"
 WINDOWS = os.name == "nt"
+SMALL_FILE_ROLLOVER_TRIGGER_BYTES = 256 * 1024
+SIZE_ROLLOVER_MARGIN_BYTES = 1024 * 1024
 EMOJI_PATTERN = re.compile(
     "["
     "\U0001F1E0-\U0001F1FF"
@@ -167,10 +169,26 @@ class FfmpegService(LogEmitterMixin):
 
     def is_session_over_size_limit(self, session: RecordSession, config: AppConfig) -> bool:
         max_bytes = self._max_file_size_bytes(config)
-        output_file = session.output_file
+        output_file = self.resolve_output_file(session.output_file)
         if max_bytes is None or output_file is None or not output_file.exists():
             return False
-        return output_file.stat().st_size >= max_bytes
+        trigger_bytes = self._size_rollover_trigger_bytes(max_bytes)
+        return output_file.stat().st_size >= trigger_bytes
+
+    def resolve_output_file(self, output_file: Path | None) -> Path | None:
+        if output_file is None:
+            return None
+        if "%03d" not in output_file.name:
+            return output_file if output_file.exists() else None
+
+        pattern = output_file.name.replace("%03d", "*")
+        candidates = sorted(
+            (path for path in output_file.parent.glob(pattern) if path.is_file()),
+            key=lambda path: (path.stat().st_mtime_ns, path.name),
+        )
+        if not candidates:
+            return None
+        return candidates[-1]
 
     def build_output_path(self, task: RecordTask, stream: StreamInfo, config: AppConfig) -> Path:
         anchor_name = self.clean_name(task.display_name or task.anchor_name or task.task_id, config.clean_emoji)
@@ -292,6 +310,16 @@ class FfmpegService(LogEmitterMixin):
         if config.max_file_size_gb <= 0:
             return None
         return max(int(config.max_file_size_gb * 1024 * 1024 * 1024), 1)
+
+    def _size_rollover_trigger_bytes(self, max_bytes: int) -> int:
+        # The active segment file can significantly under-report its final size until ffmpeg
+        # closes the file handle, so trigger rollover with a small guard band instead of waiting
+        # for the exact configured limit on disk.
+        if max_bytes <= SMALL_FILE_ROLLOVER_TRIGGER_BYTES:
+            return max(max_bytes // 2, 1)
+        if max_bytes <= SIZE_ROLLOVER_MARGIN_BYTES * 2:
+            return SMALL_FILE_ROLLOVER_TRIGGER_BYTES
+        return max(max_bytes - SIZE_ROLLOVER_MARGIN_BYTES, 1)
 
     def _get_startup_info(self) -> subprocess.STARTUPINFO | None:
         if not WINDOWS:

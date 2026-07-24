@@ -1,6 +1,6 @@
 # 飞牛云 Docker 部署说明
 
-最后更新：2026-03-31
+最后更新：2026-04-10
 
 ## 适用说明
 
@@ -48,9 +48,26 @@ python -m client.infra.docker.flyinnas_regression first-deploy --app-root .
 docker compose -f docker-compose.flyinnas.yaml up -d --build
 ```
 
+启动完成后，可直接在浏览器访问 `http://NAS_IP:18091` 打开 Docker 管理页：
+
+- `/`：主播配置页，可增删或停用主播配置
+- `/logs`：日志控制台，可查看当前录制日志
+
+页面保存的内容会直接写入挂载目录下的 `config/URL_config.ini`；日志控制台则直接读取挂载目录下的 `logs/`。
+
+如果你准备走“飞牛 Docker UI 导入 Compose + 固定镜像标签”的方式，仓库里额外提供了 [docker-compose.flyinnas.import.yaml](E:\Project\DouyinLiveRecorder-4.0.7\docker-compose.flyinnas.import.yaml)：
+
+- 不依赖 `build:`
+- 使用固定镜像标签 `douyin-live-recorder:4.0.7-fnos-webui`
+- 使用固定端口映射 `18091:18091`
+- 使用绝对挂载路径 `/vol1/docker/douyin-live-recorder/...`
+
+这份文件更适合直接粘贴到飞牛 Docker UI 的 Compose 导入页，减少变量替换和本地构建对面板识别的干扰。
+
 如果你的飞牛云界面只接受 Compose 内容，也可以直接导入 [docker-compose.flyinnas.yaml](E:\Project\DouyinLiveRecorder-4.0.7\docker-compose.flyinnas.yaml) 的内容。
 
 如果你需要改成自己的镜像仓库名或自定义版本标签，可以在同目录下创建 `.env` 文件，参考 [.env.docker.example](E:\Project\DouyinLiveRecorder-4.0.7\.env.docker.example)。
+如果 `18091` 端口冲突，也可以在 `.env` 中覆写 `DLR_WEB_PORT`。
 
 容器构建完成后，会自动启用健康检查：
 
@@ -110,15 +127,43 @@ Linux / macOS / Git Bash：
 docker compose -f docker-compose.flyinnas.yaml stop
 ```
 
-查看日志：
+查看容器总日志：
 
 ```bash
 docker compose -f docker-compose.flyinnas.yaml logs -f
 ```
 
+如果只想确认配置页是否正常，可访问：
+```bash
+curl http://127.0.0.1:18091/health
+```
+
+如果希望直接看录制器文件日志，优先打开：
+
+```text
+http://NAS_IP:18091/logs
+```
+
+该页面默认提供：
+
+- `streamget.log`
+- `PlayURL.log`
+
+## 固定镜像
+
+如果你已经在本地把当前版本固化成镜像标签 `douyin-live-recorder:4.0.7-fnos-webui`，可按下面方式转移到 NAS：
+
+```bash
+docker save douyin-live-recorder:4.0.7-fnos-webui -o douyin-live-recorder-4.0.7-fnos-webui.tar
+```
+
+将 tar 包导入 NAS 后，再用 [docker-compose.flyinnas.import.yaml](E:\Project\DouyinLiveRecorder-4.0.7\docker-compose.flyinnas.import.yaml) 创建容器。
+
 ## 关键行为
 
 - 容器内默认设置了 `DLR_HEADLESS=1`。
+- 容器入口现在是 `python -m client.infra.docker.launcher`，它会同时拉起录制主进程和配置网页。
+- Docker 网页入口现在同时提供主播配置页和只读日志控制台，更适合 NAS / FN Connect 场景。
 - 当 `config/URL_config.ini` 为空时，程序会输出明确错误并退出，避免在 NAS 中卡死在 `input()`。
 - `docker-compose.flyinnas.yaml` 使用 `restart: unless-stopped`，适合长期开机运行。
 - 健康检查会同时确认 `config/URL_config.ini` 非空，且容器内 `python main.py` 主进程仍在运行。

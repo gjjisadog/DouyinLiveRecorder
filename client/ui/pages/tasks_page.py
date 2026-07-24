@@ -74,6 +74,8 @@ ROW_HIGHLIGHT_COLORS: dict[TaskStatus, QColor] = {
     TaskStatus.FAILED: QColor("#FEF2F2"),
 }
 
+RUNTIME_STATUS_SYNC_INTERVAL_MS = 500
+
 
 class TasksPage(QWidget):
     log_requested = Signal(str, str, str)
@@ -100,7 +102,8 @@ class TasksPage(QWidget):
         self._delete_selected_action: QAction | None = None
         self._edit_selected_action: QAction | None = None
         self._status_timer = QTimer(self)
-        self._status_timer.setInterval(1500)
+        self._status_timer.setInterval(RUNTIME_STATUS_SYNC_INTERVAL_MS)
+        self._status_timer.setTimerType(Qt.PreciseTimer)
         self._status_timer.timeout.connect(self._sync_runtime_statuses)
         self._build_ui()
         self.refresh_table()

@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -17,10 +20,11 @@ from client.core.history_service import HistoryService
 from client.core.models import AppConfig, RecordTask
 from client.core.platform_router import PlatformRouter
 from client.core.task_persistence import TaskPersistenceService
-from client.infra.process.automation_bridge import AutomationBridge
+from client.infra.process.automation_bridge import AutomationBridge, write_json_atomically
 from client.ui.main_window import MainWindow
 from client.viewmodels.settings_viewmodel import SettingsViewModel
 from client.viewmodels.task_viewmodel import TaskViewModel
+from scripts.exe_automation_acceptance import send_command
 
 
 class _FakeRecordManager:
@@ -109,6 +113,103 @@ class AutomationBridgeTests(unittest.TestCase):
         self.assertEqual("req-1", response["request_id"])
         self.assertEqual("ping", response["data"]["command"])
         self.assertEqual({"value": 1}, response["data"]["payload"])
+
+    def test_write_json_atomically_replaces_file_without_temp_leftovers(self) -> None:
+        root = self.make_workspace("tmp_automation_bridge_atomic")
+        response_path = root / "automation" / "response.json"
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text('{"stale": true}', encoding="utf-8")
+
+        write_json_atomically(response_path, {"ok": True, "request_id": "req-2"})
+
+        self.assertEqual({"ok": True, "request_id": "req-2"}, json.loads(response_path.read_text(encoding="utf-8")))
+        self.assertEqual([], list(response_path.parent.glob("response.json.*.tmp")))
+
+    def test_send_command_retries_when_response_json_is_temporarily_invalid(self) -> None:
+        root = self.make_workspace("tmp_automation_send_command")
+        automation_dir = root / "automation"
+        automation_dir.mkdir(parents=True, exist_ok=True)
+        response_path = automation_dir / "response.json"
+        request_path = automation_dir / "request.json"
+
+        def write_transient_response() -> None:
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if request_path.exists():
+                    request = json.loads(request_path.read_text(encoding="utf-8"))
+                    response_path.write_text("", encoding="utf-8")
+                    time.sleep(0.1)
+                    write_json_atomically(
+                        response_path,
+                        {
+                            "ok": True,
+                            "request_id": request["id"],
+                            "command": request["command"],
+                            "data": {"echo": request["payload"]},
+                        },
+                    )
+                    return
+                time.sleep(0.05)
+            raise AssertionError("request.json was not created in time")
+
+        worker = threading.Thread(target=write_transient_response, daemon=True)
+        worker.start()
+
+        response = send_command(automation_dir, "ping", {"value": 2}, timeout_seconds=5)
+
+        worker.join(timeout=1)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(response["ok"])
+        self.assertEqual("ping", response["command"])
+        self.assertEqual({"echo": {"value": 2}}, response["data"])
+
+    def test_send_command_retries_when_response_file_is_temporarily_locked(self) -> None:
+        root = self.make_workspace("tmp_automation_send_command_locked")
+        automation_dir = root / "automation"
+        automation_dir.mkdir(parents=True, exist_ok=True)
+        response_path = automation_dir / "response.json"
+        request_path = automation_dir / "request.json"
+
+        original_read_text = Path.read_text
+        state = {"locked": False}
+
+        def fake_read_text(path: Path, *args, **kwargs) -> str:
+            if path == response_path and not state["locked"]:
+                state["locked"] = True
+                raise PermissionError("response.json is temporarily locked")
+            return original_read_text(path, *args, **kwargs)
+
+        def write_matching_response() -> None:
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if request_path.exists():
+                    request = json.loads(request_path.read_text(encoding="utf-8"))
+                    write_json_atomically(
+                        response_path,
+                        {
+                            "ok": True,
+                            "request_id": request["id"],
+                            "command": request["command"],
+                            "data": {"echo": request["payload"]},
+                        },
+                    )
+                    return
+                time.sleep(0.05)
+            raise AssertionError("request.json was not created in time")
+
+        worker = threading.Thread(target=write_matching_response, daemon=True)
+        worker.start()
+
+        with (
+            patch.object(Path, "read_text", autospec=True, side_effect=fake_read_text),
+        ):
+            response = send_command(automation_dir, "ping", {"value": 3}, timeout_seconds=5)
+
+        worker.join(timeout=1)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(state["locked"])
+        self.assertTrue(response["ok"])
+        self.assertEqual("ping", response["command"])
 
     def test_main_window_automation_add_start_stop_task(self) -> None:
         root = self.make_workspace("tmp_automation_window")

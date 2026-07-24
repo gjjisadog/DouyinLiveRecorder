@@ -10,6 +10,7 @@ from uuid import uuid4
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from client.core.enums import Platform, TaskStatus
@@ -300,6 +301,21 @@ class TaskImportExportTests(unittest.TestCase):
 
         content = export_path.read_text(encoding="utf-8-sig")
         self.assertIn("原画,https://live.douyin.com/123,主播甲", content)
+
+
+    def test_tasks_page_runtime_status_timer_uses_precise_500ms_interval(self) -> None:
+        root = self.make_workspace("tmp_tasks_page_timer")
+        store_path = root / "client_data" / "tasks.json"
+        page = TasksPage(
+            viewmodel=TaskViewModel(tasks=[]),
+            record_manager=_FakeRecordManager(),
+            task_persistence=TaskPersistenceService(store_path),
+        )
+        self.addCleanup(page.close)
+        self.addCleanup(page._status_timer.stop)
+
+        self.assertEqual(500, page._status_timer.interval())
+        self.assertEqual(Qt.PreciseTimer, page._status_timer.timerType())
 
 
 if __name__ == "__main__":

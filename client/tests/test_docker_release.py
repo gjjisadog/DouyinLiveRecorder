@@ -90,6 +90,17 @@ class DockerReleaseTests(unittest.TestCase):
             self.assertIn(APP_VERSION, content)
             if relative_path.endswith(".yaml"):
                 self.assertIn(expected, content)
+                self.assertIn("DLR_WEB_PORT", content)
+            else:
+                self.assertIn("DLR_WEB_PORT=18091", content)
+
+    def test_flyinnas_import_compose_uses_fixed_image_and_port(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        content = (repo_root / "docker-compose.flyinnas.import.yaml").read_text(encoding="utf-8")
+
+        self.assertIn(f"image: douyin-live-recorder:{APP_VERSION}-fnos-webui", content)
+        self.assertIn('- "18091:18091"', content)
+        self.assertNotIn("build:", content)
 
     def test_github_workflow_uses_release_module_for_docker_tags(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]

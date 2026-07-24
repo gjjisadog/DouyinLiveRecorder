@@ -9,6 +9,7 @@ from pathlib import Path
 DEFAULT_APP_ROOT = Path("/app")
 DEFAULT_PROC_ROOT = Path("/proc")
 DEFAULT_TARGET = "main.py"
+DEFAULT_LAUNCHER_TARGET = "client.infra.docker.launcher"
 
 
 def url_config_path(app_root: Path) -> Path:
@@ -46,24 +47,35 @@ def iter_process_cmdlines(proc_root: Path) -> list[str]:
     return cmdlines
 
 
-def is_recorder_process_running(proc_root: Path, target_script: str = DEFAULT_TARGET) -> bool:
-    target = target_script.lower()
+def is_python_process_running(proc_root: Path, target: str) -> bool:
+    normalized_target = target.lower()
     for cmdline in iter_process_cmdlines(proc_root):
         normalized = cmdline.lower()
-        if target in normalized and "python" in normalized:
+        if normalized_target in normalized and "python" in normalized:
             return True
     return False
+
+
+def is_recorder_process_running(proc_root: Path, target_script: str = DEFAULT_TARGET) -> bool:
+    return is_python_process_running(proc_root, target_script)
+
+
+def is_launcher_process_running(proc_root: Path, target_script: str = DEFAULT_LAUNCHER_TARGET) -> bool:
+    return is_python_process_running(proc_root, target_script)
 
 
 def run_healthcheck(
     app_root: Path = DEFAULT_APP_ROOT,
     proc_root: Path = DEFAULT_PROC_ROOT,
     target_script: str = DEFAULT_TARGET,
+    launcher_target: str = DEFAULT_LAUNCHER_TARGET,
 ) -> tuple[bool, str]:
     config_path = url_config_path(app_root)
     entries = read_url_entries(config_path)
+    if not is_launcher_process_running(proc_root, target_script=launcher_target):
+        return False, f"launcher process not running: {launcher_target}"
     if not entries:
-        return False, f"URL config missing or empty: {config_path}"
+        return True, f"waiting for configuration: {config_path}"
     if not is_recorder_process_running(proc_root, target_script=target_script):
         return False, f"recorder process not running: {target_script}"
     return True, f"recorder healthy with {len(entries)} configured target(s)"
@@ -73,7 +85,13 @@ def main() -> int:
     app_root = Path(os.environ.get("DLR_HEALTHCHECK_ROOT", DEFAULT_APP_ROOT))
     proc_root = Path(os.environ.get("DLR_HEALTHCHECK_PROC_ROOT", DEFAULT_PROC_ROOT))
     target_script = os.environ.get("DLR_HEALTHCHECK_TARGET", DEFAULT_TARGET)
-    healthy, message = run_healthcheck(app_root=app_root, proc_root=proc_root, target_script=target_script)
+    launcher_target = os.environ.get("DLR_HEALTHCHECK_LAUNCHER_TARGET", DEFAULT_LAUNCHER_TARGET)
+    healthy, message = run_healthcheck(
+        app_root=app_root,
+        proc_root=proc_root,
+        target_script=target_script,
+        launcher_target=launcher_target,
+    )
     print(message)
     return 0 if healthy else 1
 

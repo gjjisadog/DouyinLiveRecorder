@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from client.infra.docker.healthcheck import (
+    is_launcher_process_running,
     is_recorder_process_running,
     read_url_entries,
     run_healthcheck,
@@ -43,12 +44,13 @@ class DockerHealthcheckTests(unittest.TestCase):
         root = self.make_workspace("tmp_docker_healthcheck_missing_config")
         proc_root = root / "proc"
         proc_root.mkdir(parents=True, exist_ok=True)
+        self.write_cmdline(proc_root, "99", "python", "-m", "client.infra.docker.launcher")
         self.write_cmdline(proc_root, "100", "python", "main.py")
 
         healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
 
-        self.assertFalse(healthy)
-        self.assertIn("URL config missing or empty", message)
+        self.assertTrue(healthy)
+        self.assertIn("waiting for configuration", message)
 
     def test_run_healthcheck_fails_when_recorder_process_is_missing(self) -> None:
         root = self.make_workspace("tmp_docker_healthcheck_missing_process")
@@ -57,6 +59,7 @@ class DockerHealthcheckTests(unittest.TestCase):
         config_dir = root / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         (config_dir / "URL_config.ini").write_text("https://live.example.com/a\n", encoding="utf-8-sig")
+        self.write_cmdline(proc_root, "99", "python", "-m", "client.infra.docker.launcher")
 
         healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
 
@@ -72,6 +75,29 @@ class DockerHealthcheckTests(unittest.TestCase):
 
         self.assertTrue(is_recorder_process_running(proc_root))
 
+    def test_is_launcher_process_running_matches_python_module(self) -> None:
+        root = self.make_workspace("tmp_docker_healthcheck_launcher_scan")
+        proc_root = root / "proc"
+        proc_root.mkdir(parents=True, exist_ok=True)
+        self.write_cmdline(proc_root, "100", "python", "-m", "client.infra.docker.launcher")
+        self.write_cmdline(proc_root, "101", "python", "main.py")
+
+        self.assertTrue(is_launcher_process_running(proc_root))
+
+    def test_run_healthcheck_fails_when_launcher_process_is_missing(self) -> None:
+        root = self.make_workspace("tmp_docker_healthcheck_missing_launcher")
+        proc_root = root / "proc"
+        proc_root.mkdir(parents=True, exist_ok=True)
+        config_dir = root / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "URL_config.ini").write_text("https://live.example.com/a\n", encoding="utf-8-sig")
+        self.write_cmdline(proc_root, "200", "python", "main.py")
+
+        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
+
+        self.assertFalse(healthy)
+        self.assertIn("launcher process not running", message)
+
     def test_run_healthcheck_passes_when_config_exists_and_process_is_running(self) -> None:
         root = self.make_workspace("tmp_docker_healthcheck_ok")
         proc_root = root / "proc"
@@ -79,6 +105,7 @@ class DockerHealthcheckTests(unittest.TestCase):
         config_dir = root / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         (config_dir / "URL_config.ini").write_text("https://live.example.com/a\n", encoding="utf-8-sig")
+        self.write_cmdline(proc_root, "199", "python", "-m", "client.infra.docker.launcher")
         self.write_cmdline(proc_root, "200", "python", "main.py")
 
         healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
