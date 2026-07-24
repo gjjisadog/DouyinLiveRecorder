@@ -40,6 +40,36 @@ class PlatformMigrationTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(expected, router.detect_platform(url))
 
+    def test_platform_router_detects_direct_stream_urls_with_query_string(self) -> None:
+        router = PlatformRouter()
+
+        cases = {
+            "https://example.com/live/master.m3u8?token=abc123": Platform.DIRECT,
+            "https://example.com/live/channel.flv?auth=1": Platform.DIRECT,
+        }
+
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(expected, router.detect_platform(url))
+
+    def test_stream_resolver_resolves_direct_m3u8_with_query_string(self) -> None:
+        resolver = StreamResolver()
+        config = AppConfig(quality="原画")
+        task = RecordTask(
+            task_id="task-direct-query",
+            url="https://example.com/live/master.m3u8?token=abc123",
+            quality="超清",
+        )
+
+        stream_info = resolver.resolve_task(task, config)
+
+        self.assertEqual(Platform.DIRECT, task.platform)
+        self.assertTrue(stream_info.is_live)
+        self.assertEqual("https://example.com/live/master.m3u8?token=abc123", stream_info.record_url)
+        self.assertEqual("https://example.com/live/master.m3u8?token=abc123", stream_info.m3u8_url)
+        self.assertEqual("", stream_info.flv_url)
+        self.assertEqual("UHD", stream_info.quality)
+
     def test_stream_resolver_resolves_netease_cc_via_legacy_modules(self) -> None:
         resolver = StreamResolver()
         config = AppConfig(quality="原画")

@@ -1,13 +1,24 @@
 """Recording worker."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
+from pathlib import Path
 
 from client.core.enums import TaskStatus
 from client.core.ffmpeg_service import FfmpegService
 from client.core.history_service import HistoryService
 from client.core.models import AppConfig, RecordSession, RecordTask
 from client.core.stream_resolver import StreamResolver
-from client.infra.logging.log_service import LEVEL_DEBUG, LEVEL_ERROR, LEVEL_INFO, LEVEL_WARNING, LogEmitterMixin, LogHandler, SOURCE_RECORD
+from client.infra.logging.log_service import (
+    LEVEL_DEBUG,
+    LEVEL_ERROR,
+    LEVEL_INFO,
+    LEVEL_WARNING,
+    LogEmitterMixin,
+    LogHandler,
+    SOURCE_RECORD,
+)
 
 
 class RecordWorker(LogEmitterMixin):
@@ -56,10 +67,13 @@ class RecordWorker(LogEmitterMixin):
         return session
 
     def stop(self, task: RecordTask) -> None:
-        if task.task_id not in self.sessions:
+        session = self.sessions.get(task.task_id)
+        if session is None:
             self._emit_log(f"任务 {task.task_id} 当前没有活动录制会话。", LEVEL_DEBUG)
         else:
             self._emit_log(f"开始停止任务 {task.task_id}。", LEVEL_INFO)
+            self._sync_output_path(task, session)
+
         self.ffmpeg_service.stop_record(task)
         task.status = TaskStatus.STOPPED
         self.sessions.pop(task.task_id, None)
@@ -72,6 +86,7 @@ class RecordWorker(LogEmitterMixin):
         if session is None:
             return False
 
+        output_path_changed = self._sync_output_path(task, session)
         if self.ffmpeg_service.is_session_over_size_limit(session, self.config):
             self._rollover_task(task, session)
             return True
@@ -81,9 +96,10 @@ class RecordWorker(LogEmitterMixin):
             if task.status != TaskStatus.RUNNING:
                 task.status = TaskStatus.RUNNING
                 return True
-            return False
+            return output_path_changed
 
         self.sessions.pop(task.task_id, None)
+        self._sync_output_path(task, session)
         if return_code == 0:
             if task.status != TaskStatus.STOPPED:
                 task.status = TaskStatus.COMPLETED
@@ -91,7 +107,7 @@ class RecordWorker(LogEmitterMixin):
                     self.history_service.record_finished(task, TaskStatus.COMPLETED)
                 self._emit_log(f"任务 {task.task_id} 的录制进程已退出。", LEVEL_INFO)
                 return True
-            return False
+            return output_path_changed
 
         task.status = TaskStatus.FAILED
         task.last_error = f"ffmpeg exited with code {return_code}"
@@ -107,27 +123,36 @@ class RecordWorker(LogEmitterMixin):
         return changed
 
     def _rollover_task(self, task: RecordTask, session: RecordSession) -> None:
-        output_file = session.output_file
+        previous_output = session.output_file
         self._emit_log(
             f"任务 {task.task_id} 的录制文件已达到单文件上限，准备自动切换新文件。",
             LEVEL_INFO,
         )
         self.ffmpeg_service.stop_record(task)
         self.sessions.pop(task.task_id, None)
+        self._sync_output_path(task, session)
         if self.history_service is not None:
             self.history_service.record_finished(task, TaskStatus.COMPLETED)
 
         try:
             self.start(task, config=self.config)
             self._emit_log(
-                f"任务 {task.task_id} 已自动切换到新的录制文件。上一段：{output_file}",
+                f"任务 {task.task_id} 已自动切换到新的录制文件。上一段：{previous_output}",
                 LEVEL_INFO,
             )
         except Exception as exc:
             task.last_error = str(exc)
             if task.status == TaskStatus.PENDING:
                 task.status = TaskStatus.FAILED
-            self._emit_log(
-                f"任务 {task.task_id} 在按大小切段后重启失败：{exc}",
-                LEVEL_ERROR,
-            )
+            self._emit_log(f"任务 {task.task_id} 在按大小切段后重启失败：{exc}", LEVEL_ERROR)
+
+    def _sync_output_path(self, task: RecordTask, session: RecordSession | None) -> bool:
+        if session is None:
+            return False
+        resolved_output = self.ffmpeg_service.resolve_output_file(session.output_file)
+        if not isinstance(resolved_output, Path):
+            return False
+        if task.output_path == resolved_output:
+            return False
+        task.output_path = resolved_output
+        return True

@@ -1,6 +1,6 @@
 # 客户端发布与打包
 
-最后更新：2026-03-31
+最后更新：2026-04-05
 
 ## 当前产物目标
 
@@ -23,6 +23,104 @@
 - 构建期间的已知 warning 已写入 `build/client-release/work/DouyinLiveRecorder Client/warn-DouyinLiveRecorder Client.txt`，当前视为 conda + PyInstaller 下的已知告警噪音。
 - 当前宿主机未安装真实 `ffmpeg`，本轮通过临时 `ffmpeg` stub 绕过依赖确认提示，仅验证窗口级启动与首次初始化。
 - 仍建议在正式发版前补一轮首页、设置页、任务页、历史页、日志页和托盘的人工点点点检查，以及安装真实 `ffmpeg` 后的录制链路冒烟。
+
+## 发布前验收收口（2026-04-05）
+
+### 已确认可作为发布前证据
+
+- 打包版主程序：
+  - `dist/DouyinLiveRecorder Client/DouyinLiveRecorder Client.exe`
+  - 已确认可真实启动并完成自动化桥接验收
+- `BL-019` 真实 `1 GB` 按大小切段验收：
+  - 证据文件：`tmp_bl019_local_source_1gb_run1/acceptance_summary.json`
+  - 验收方式：本地连续 HLS 源 + 打包版 EXE + `direct m3u8`
+  - 结果：
+    - `success = true`
+    - `rollover_detected = true`
+    - 共 3 段文件
+    - 段大小：
+      - `1073444092`
+      - `1075609664`
+      - `645593504`
+    - 阈值：`1073741824` bytes
+    - `max_overshoot_bytes = 1867840`
+    - 最大超限占比约 `0.17%`
+    - 录制日志已出现两次“录制文件已达到单文件上限，准备自动切换新文件”
+  - 当前发布决策：
+    - 接受当前 `1 MB` 安全余量结果
+    - 不再继续微调阈值策略
+- `BL-017` 打包版 `get_logs` 稳定性验收：
+  - 证据文件：
+    - `tmp_bl017_get_logs_stability_run1/acceptance_summary.json`
+    - `tmp_bl017_get_logs_stability_run3/acceptance_summary.json`
+    - `tmp_bl017_get_logs_stability_run4/acceptance_summary.json`
+  - 汇总结果：
+    - 累计 `105/105` 次 `get_logs` 调用成功
+    - 未复现 `BL-013` 中的超时
+    - 常态响应约 `200ms`
+    - 部分轮次约 `400ms`
+    - 已观测最大延迟 `406.09ms`
+- `BL-020` 外部长时源对照样本：
+  - 证据文件：`tmp_bl020_external_control_abc_run1/acceptance_summary.json`
+  - 对照源：`https://abcnews-streams.akamaized.net/hls/live/2023566/abcnewshudson7/master_4000.m3u8`
+  - 验收口径：外部新闻直播流、`0.01 GB` 阈值、`600s` 长样本
+  - 结果：
+    - `success = true`
+    - `rollover_detected = true`
+    - 前 3 段大小：
+      - `9744604`
+      - `9750808`
+      - `9776000`
+    - `max_overshoot_bytes = 0`
+  - 价值：
+    - 说明当前切段链路不只在本地自建连续流下有效
+    - 在更接近真实业务流的外部长时样本中，同样未出现“未达阈值先自然结束再重拉”的问题
+- `BL-021` 外部长时真实 `1 GB` 全量样本：
+  - 证据文件：`tmp_bl021_external_real_1gb_run1/acceptance_summary.json`
+  - 样本源：`https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8`
+  - 启动时间：`2026-04-04 23:22:34`
+  - 首次按大小切段时间：`2026-04-05 00:18:00`
+  - 停止时间：`2026-04-05 00:37:35`
+  - 验收口径：外部长时公开新闻直播流、真实 `1 GB` 阈值、`4500s` 长样本
+  - 结果：
+    - `success = true`
+    - `rollover_detected = true`
+    - 共 2 段文件
+    - 第一段大小：`1072987252`
+    - 第二段大小：`392916052`
+    - 阈值：`1073741824` bytes
+    - `max_overshoot_bytes = 0`
+    - 历史记录中第一段状态为 `completed`，第二段状态为测试结束后的 `stopped`
+    - 录制日志明确出现“录制文件已达到单文件上限，准备自动切换新文件”
+  - 价值：
+    - 已补齐此前仍缺的“外部长时真实 `1 GB` 全量样本”
+    - 说明打包版客户端在公开外部长时源下，也能真实跑到 `1 GB` 并完成按大小自动切段
+- `BL-022` 外部源 `get_logs` 对照样本：
+  - 证据文件：`tmp_bl022_external_get_logs_run1/acceptance_summary.json`
+  - 样本源：`https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8`
+  - 验收口径：外部公开新闻直播流、`300s` 样本、`1s` 查询间隔
+  - 结果：
+    - `success = true`
+    - `total_calls = 240`
+    - `successful_calls = 240`
+    - `failed_calls = 0`
+    - `max_latency_ms = 404.22`
+    - `avg_latency_ms = 250.36`
+  - 价值：
+    - 已补齐此前只基于本地连续流的 `get_logs` 稳定性证据
+    - 说明外部源录制过程中，文件桥下的 `get_logs` 同样稳定
+
+### 当前仍保留的边界
+
+- 公网 Mux 测试流样本 `tmp_bl019_real_1gb_run2/` 已确认不适合作为最终依据，因为流会在未达到 `1 GB` 前自然结束并被重新拉起。
+- `BL-021` 已补齐一条外部长时真实 `1 GB` 证据，但当前外部 `1 GB` 背书仍主要来自单一公开新闻源，不等价于“所有外部源都已覆盖”。
+- `BL-022` 已补齐一条外部源 `get_logs` 对照样本，但当前外部 `get_logs` 背书仍主要来自单一公开新闻源。
+- 因此当前仓库能明确给出的结论是：
+  - 打包版客户端的 `1 GB` 自动切段链路已在可控本地长时源下通过
+  - 打包版客户端的 `1 GB` 自动切段链路也已在公开外部长时新闻流下通过
+  - 外部长时新闻流样本已在 `0.01 GB` 阈值下通过稳定切段对照
+  - `get_logs` 在当前文件桥路径下已在本地连续流和外部公开新闻流两条样本上稳定
+  - 若后续还要继续补强，只剩“更多外部源的 `1 GB` 全量样本”或“外部源 `get_logs` 对照样本”这类增强证据
 
 ## 当前可恢复的发布信息（2026-04-01 复核）
 
@@ -151,6 +249,9 @@ Get-Content (Join-Path $dist 'DouyinLiveRecorder-Client-4.0.7-windows-x64.sha256
 4. 启动 `dist` 中的客户端，确认首页、设置页、任务页、系统托盘和日志页可正常打开。
 5. 检查 `client_data` 首次初始化是否会写出 `client.db`、`config.json`、`tasks.json`、`storage_meta.json`，以及历史功能首次写入时补出 `history.json`。
 6. 验证 `ffmpeg` 缺失提示、任务导入导出、设置保存、通知测试与历史页加载。
+7. 如需引用最新自动化验收结论，优先附上：
+   - `tmp_bl019_local_source_1gb_run1/acceptance_summary.json`
+   - `tmp_bl017_get_logs_stability_run3/acceptance_summary.json`
 
 ## 后续可继续补强
 

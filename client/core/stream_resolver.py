@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import urlsplit
 
 from client.core.enums import Platform
 from client.core.exceptions import PlatformNotSupportedError
@@ -44,13 +45,14 @@ class StreamResolver(LogEmitterMixin):
             self._emit_log(f"任务 {task.task_id} 解析直播流时将使用代理。", LEVEL_DEBUG)
 
         if task.platform == Platform.DIRECT:
+            lower_path = urlsplit(task.url.lower()).path
             stream_info = StreamInfo(
                 is_live=True,
                 title=task.title or task.display_name or task.task_id,
                 quality=quality_code,
                 record_url=task.url,
-                m3u8_url=task.url if task.url.endswith(".m3u8") else "",
-                flv_url=task.url if task.url.endswith(".flv") else "",
+                m3u8_url=task.url if lower_path.endswith(".m3u8") else "",
+                flv_url=task.url if lower_path.endswith(".flv") else "",
             )
             self._log_resolved(task, stream_info)
             return stream_info

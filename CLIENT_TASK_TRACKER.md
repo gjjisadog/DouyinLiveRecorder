@@ -1,6 +1,6 @@
 # 客户端任务台账
 
-最后更新：2026-03-31
+最后更新：2026-04-05
 
 ## 维护规则
 
@@ -42,12 +42,113 @@
 
 ## 当前建议推进顺序
 
-1. Docker 镜像实机构建验收
-2. 客户端录制链路二轮人工冒烟
-3. 发布说明 / Release Notes 自动生成
-4. 飞牛云主机实跑回归记录补档
+1. 如需继续补强发布背书，可补第二条“外部长时真实 `1 GB` 全量样本”
+2. 如需继续补强自动化背书，可补第二条外部源 `get_logs` 对照样本
+3. 如需继续增强文件桥，优先沿当前进程内文件桥扩展命令面
+4. 若当前目标是提交/发包，当前证据面已足够，不再继续微调 `1 MB` 安全余量
 
 ## 完成记录
+
+### 2026-04-05
+
+#### BL-024 第二条外部源 `get_logs` 对照样本
+
+- 已使用第二条外部公开新闻源完成 `get_logs` 对照样本，样本源为：
+  - `https://ndtv24x7elemarchana.akamaized.net/hls/live/2003678/ndtv24x7/masterp_720p@3.m3u8`
+- 关键产物：
+  - [acceptance_summary.json](E:\Project\DouyinLiveRecorder-4.0.7\tmp_bl024_external_get_logs_run3\acceptance_summary.json)
+  - [BL-024 session](E:\Project\DouyinLiveRecorder-4.0.7\docs\sessions\2026-04-05-bl024-external-get-logs-ndtv.md)
+- 验证命令：
+
+```powershell
+& '.\.client-conda-env\python.exe' scripts\exe_get_logs_stability.py --repo-root . --workspace .\tmp_bl024_external_get_logs_run3 --stream-url https://ndtv24x7elemarchana.akamaized.net/hls/live/2003678/ndtv24x7/masterp_720p@3.m3u8 --display-name BL024_External_GetLogs_NDTV720 --record-seconds 300 --query-interval 1 --query-timeout 12 --log-limit 200 --split-seconds 86400
+```
+
+- 验证结果：
+  - `success=true`
+  - `241/241` 次 `get_logs` 成功
+  - `max_latency_ms = 404.53`
+  - `avg_latency_ms = 248.87`
+
+#### BL-022 外部源 `get_logs` 对照样本
+
+- 已将 `scripts/exe_get_logs_stability.py` 做最小补强，支持直接指定外部 `--stream-url`，不再强依赖本地 HLS 源。
+- 已使用 Global News 外部公开 HLS 源完成一轮 `get_logs` 对照样本：
+  - [acceptance_summary.json](E:\Project\DouyinLiveRecorder-4.0.7\tmp_bl022_external_get_logs_run1\acceptance_summary.json)
+  - [BL-022 session](E:\Project\DouyinLiveRecorder-4.0.7\docs\sessions\2026-04-05-bl022-external-get-logs.md)
+- 验证命令：
+
+```powershell
+& '.\.client-conda-env\python.exe' scripts\exe_get_logs_stability.py --repo-root . --workspace .\tmp_bl022_external_get_logs_run1 --stream-url https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8 --display-name BL022_External_GetLogs_GlobalNews --record-seconds 300 --query-interval 1 --query-timeout 12 --log-limit 200 --split-seconds 86400
+```
+
+- 验证结果：
+  - `success=true`
+  - `240/240` 次 `get_logs` 成功
+  - `max_latency_ms = 404.22`
+  - `avg_latency_ms = 250.36`
+
+#### BL-021 外部长时真实 1GB 全量样本
+
+- 已使用打包版客户端对公开外部长时新闻直播源完成真实 `1 GB` 阈值长样本验收。
+- 本轮样本使用的源为：
+  - `https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8`
+- 关键产物：
+  - [acceptance_summary.json](E:\Project\DouyinLiveRecorder-4.0.7\tmp_bl021_external_real_1gb_run1\acceptance_summary.json)
+  - [BL-021 session](E:\Project\DouyinLiveRecorder-4.0.7\docs\sessions\2026-04-05-bl021-external-real-1gb.md)
+- 验证参数：
+
+```powershell
+& '.\.client-conda-env\python.exe' scripts\exe_automation_acceptance.py --repo-root . --workspace .\tmp_bl021_external_real_1gb_run1 --stream-url https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8 --display-name BL021_External_GlobalNews_1GB --record-seconds 4500 --max-file-size-gb 1.0 --split-seconds 86400 --poll-interval 10 --log-limit 200
+```
+
+- 验证结果：
+  - `success=true`
+  - `rollover_detected=true`
+  - 第一段大小：`1072987252`
+  - 第二段大小：`392916052`
+  - 阈值：`1073741824`
+  - `max_overshoot_bytes = 0`
+  - 已明确出现一次真实 `1 GB` 自动切段
+
+#### 第二条外部源探索与自动化桥健壮性补强
+
+- 已修复带 query 的直链 HLS 会被识别成 `unknown` 的问题：
+  - 修改 [platform_router.py](E:\Project\DouyinLiveRecorder-4.0.7\client\core\platform_router.py)
+  - 修改 [stream_resolver.py](E:\Project\DouyinLiveRecorder-4.0.7\client\core\stream_resolver.py)
+  - 新增 [test_platform_migration.py](E:\Project\DouyinLiveRecorder-4.0.7\client\tests\test_platform_migration.py) 直链 query 用例
+- 已补文件桥自动化的原子写入与重试：
+  - 修改 [automation_bridge.py](E:\Project\DouyinLiveRecorder-4.0.7\client\infra\process\automation_bridge.py)
+  - 修改 [exe_automation_acceptance.py](E:\Project\DouyinLiveRecorder-4.0.7\scripts\exe_automation_acceptance.py)
+  - 扩展 [test_automation_bridge.py](E:\Project\DouyinLiveRecorder-4.0.7\client\tests\test_automation_bridge.py)
+- 已重打包客户端，使上述修正进入：
+  - `dist/DouyinLiveRecorder Client/DouyinLiveRecorder Client.exe`
+- `BL-023` 当前探索状态：
+  - 已确认 `23 ABC / Uplynk` 可被新打包版按 `direct` 录制
+  - 短样本产物：[acceptance_summary.json](E:\Project\DouyinLiveRecorder-4.0.7\tmp_bl023_external_uplynk_probe2\acceptance_summary.json)
+  - 长样本尝试产物：[acceptance_summary.json](E:\Project\DouyinLiveRecorder-4.0.7\tmp_bl023_external_real_1gb_run2\acceptance_summary.json)
+  - 当前未收口原因：
+    - 源的真实落盘速率低于 playlist 标称值
+    - `5100s` 样本中途被 `response.json` 文件锁打断；该脚本问题现已补重试，但这轮样本本身未跑到 `1 GB`
+
+### 2026-04-04
+
+#### 客户端发布前验收收口
+
+- 已完成打包版客户端录制链路的最后一轮证据收口，核心证据包括：
+  - `BL-017`：`get_logs` 稳定性累计 `105/105` 成功
+  - `BL-019`：本地连续流真实 `1 GB` 自动切段样本通过
+  - `BL-020`：外部长时新闻流 `0.01 GB` 对照样本通过
+- 已更新 [CLIENT_RELEASE.md](E:\Project\DouyinLiveRecorder-4.0.7\CLIENT_RELEASE.md)、[docs\handover\current_status.md](E:\Project\DouyinLiveRecorder-4.0.7\docs\handover\current_status.md)、[docs\handover\known_issues.md](E:\Project\DouyinLiveRecorder-4.0.7\docs\handover\known_issues.md)、[docs\handover\next_steps.md](E:\Project\DouyinLiveRecorder-4.0.7\docs\handover\next_steps.md)、[docs\handover\executable_backlog.md](E:\Project\DouyinLiveRecorder-4.0.7\docs\handover\executable_backlog.md)，把可发布结论与剩余边界集中沉淀。
+- 本轮提交前最小验证已重跑：
+
+```powershell
+& '.\.client-conda-env\python.exe' -m unittest client.tests.test_core_services -v
+& '.\.client-conda-env\python.exe' -m unittest client.tests.test_task_import_export -v
+& '.\.client-conda-env\python.exe' -m py_compile client\core\ffmpeg_service.py client\core\record_worker.py client\ui\pages\tasks_page.py scripts\exe_automation_acceptance.py scripts\exe_get_logs_stability.py scripts\local_hls_test_source.py
+```
+
+- 验证结果：`15 + 8` 个定向回归测试全部通过，相关源码与脚本编译检查通过。
 
 ### 2026-03-31
 

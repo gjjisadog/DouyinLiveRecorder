@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import unittest
 from datetime import datetime
 from pathlib import Path
-import shutil
 from unittest.mock import Mock, patch
 
 from client.core.enums import OutputFormat, Platform, TaskStatus
@@ -133,6 +133,7 @@ class RecordWorkerTests(unittest.TestCase):
         resolver = Mock()
         ffmpeg_service = Mock()
         ffmpeg_service.is_session_over_size_limit.return_value = False
+        ffmpeg_service.resolve_output_file.return_value = None
         history = Mock()
         worker = RecordWorker(
             stream_resolver=resolver,
@@ -163,22 +164,26 @@ class RecordWorkerTests(unittest.TestCase):
             task_id="task-105",
             started_at=datetime(2026, 3, 31, 12, 0, 0),
             process_id=1001,
-            output_file=Path("downloads/old.ts"),
+            output_file=Path("downloads/old_%03d.ts"),
             command=["ffmpeg"],
         )
         new_session = RecordSession(
             task_id="task-105",
             started_at=datetime(2026, 3, 31, 12, 5, 0),
             process_id=1002,
-            output_file=Path("downloads/new.ts"),
+            output_file=Path("downloads/new_%03d.ts"),
             command=["ffmpeg"],
         )
         resolver = Mock()
         resolver.resolve_task.return_value = stream
         ffmpeg_service = Mock()
         ffmpeg_service.is_session_over_size_limit.return_value = True
-        ffmpeg_service.build_command.return_value = (["ffmpeg"], Path("downloads/new.ts"))
+        ffmpeg_service.build_command.return_value = (["ffmpeg"], Path("downloads/new_%03d.ts"))
         ffmpeg_service.start_record.return_value = new_session
+        ffmpeg_service.resolve_output_file.side_effect = [
+            Path("downloads/old_000.ts"),
+            Path("downloads/new_000.ts"),
+        ]
         history = Mock()
         worker = RecordWorker(
             stream_resolver=resolver,
@@ -190,7 +195,7 @@ class RecordWorkerTests(unittest.TestCase):
             task_id="task-105",
             url="https://live.example.com/rollover",
             status=TaskStatus.RUNNING,
-            output_path=Path("downloads/old.ts"),
+            output_path=Path("downloads/old_%03d.ts"),
             display_name="主播 A",
         )
         worker.sessions[task.task_id] = old_session
@@ -202,9 +207,37 @@ class RecordWorkerTests(unittest.TestCase):
         history.record_finished.assert_called_once_with(task, TaskStatus.COMPLETED)
         history.record_started.assert_called_once_with(task, new_session)
         self.assertEqual(TaskStatus.RUNNING, task.status)
-        self.assertEqual(Path("downloads/new.ts"), task.output_path)
+        self.assertEqual(Path("downloads/new_%03d.ts"), worker.sessions[task.task_id].output_file)
+        self.assertEqual(Path("downloads/new_%03d.ts"), task.output_path)
         self.assertEqual("新分段", task.title)
-        self.assertEqual(new_session, worker.sessions[task.task_id])
+
+    def test_stop_updates_task_output_path_to_real_segment_file(self) -> None:
+        resolver = Mock()
+        ffmpeg_service = Mock()
+        ffmpeg_service.resolve_output_file.return_value = Path("downloads/segment_000.ts")
+        history = Mock()
+        worker = RecordWorker(
+            stream_resolver=resolver,
+            ffmpeg_service=ffmpeg_service,
+            config=AppConfig(),
+            history_service=history,
+        )
+        task = RecordTask(
+            task_id="task-106",
+            url="https://live.example.com/segment",
+            status=TaskStatus.RUNNING,
+            output_path=Path("downloads/segment_%03d.ts"),
+        )
+        worker.sessions[task.task_id] = RecordSession(
+            task_id=task.task_id,
+            started_at=datetime.now(),
+            output_file=Path("downloads/segment_%03d.ts"),
+        )
+
+        worker.stop(task)
+
+        self.assertEqual(Path("downloads/segment_000.ts"), task.output_path)
+        history.record_finished.assert_called_once_with(task, TaskStatus.STOPPED)
 
 
 class FfmpegServiceTests(unittest.TestCase):
@@ -266,6 +299,29 @@ class FfmpegServiceTests(unittest.TestCase):
 
         self.assertTrue(service.is_session_over_size_limit(session, AppConfig(max_file_size_gb=0.0000005)))
         self.assertFalse(service.is_session_over_size_limit(session, AppConfig(max_file_size_gb=1.0)))
+
+    def test_is_session_over_size_limit_resolves_segment_template_path(self) -> None:
+        workspace = Path("tmp_ffmpeg_segment_template_test")
+        workspace.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, workspace, True)
+        segment_file = workspace / "segment_000.ts"
+        segment_file.write_bytes(b"a" * 1024)
+        session = RecordSession(
+            task_id="task-204",
+            started_at=datetime.now(),
+            output_file=workspace / "segment_%03d.ts",
+        )
+        service = FfmpegService()
+
+        self.assertEqual(segment_file, service.resolve_output_file(session.output_file))
+        self.assertTrue(service.is_session_over_size_limit(session, AppConfig(max_file_size_gb=0.0000005)))
+
+    def test_size_rollover_trigger_bytes_uses_guard_band_for_small_and_large_limits(self) -> None:
+        service = FfmpegService()
+
+        self.assertEqual(107374, service._size_rollover_trigger_bytes(214748))
+        self.assertEqual(262144, service._size_rollover_trigger_bytes(1073741))
+        self.assertEqual(9688842, service._size_rollover_trigger_bytes(10737418))
 
 
 class NotificationServiceTests(unittest.TestCase):

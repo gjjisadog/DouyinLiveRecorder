@@ -1,0 +1,25 @@
+services:
+  douyin-live-recorder:
+    image: douyin-live-recorder:4.0.7-fnos-webui
+    container_name: douyin-live-recorder
+    environment:
+      TZ: Asia/Shanghai
+      TERM: xterm-256color
+      DLR_HEADLESS: "1"
+      DLR_WEB_HOST: 0.0.0.0
+      DLR_WEB_PORT: "18091"
+    volumes:
+      - /vol1/docker/douyin-live-recorder/config:/app/config
+      - /vol1/docker/douyin-live-recorder/logs:/app/logs
+      - /vol1/docker/douyin-live-recorder/backup_config:/app/backup_config
+      - /vol1/docker/douyin-live-recorder/downloads:/app/downloads
+    ports:
+      - "18091:18091"
+    healthcheck:
+      test: ["CMD", "python", "-m", "client.infra.docker.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    stop_grace_period: 30s

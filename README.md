@@ -367,10 +367,18 @@ python main.py
 docker compose up -d --build
 ```
 
+Docker 部署默认会同时开启一个轻量配置页，浏览器访问 `http://localhost:18091` 即可直接增删、停用和批量编辑主播列表。
+
 可选先复制 `.env.docker.example` 为 `.env`，覆盖镜像仓库名或版本标签：
 
 ```bash
 cp .env.docker.example .env
+```
+
+如需修改网页端口，可在 `.env` 中设置：
+
+```bash
+DLR_WEB_PORT=18091
 ```
 
 2.本地构建镜像(可选)
@@ -381,6 +389,8 @@ cp .env.docker.example .env
 docker build -t douyin-live-recorder:4.0.7 .
 docker compose up -d
 ```
+
+配置页默认同样监听 `18091` 端口；如果宿主机端口冲突，请同步修改 `.env` 里的 `DLR_WEB_PORT`。
 
 3.buildx 多架构发布(可选)
 
