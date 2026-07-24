@@ -358,3 +358,12 @@
 - `docs/sessions/2026-04-05-bl022-external-get-logs.md`
 - `docs/sessions/2026-04-04-bl020-external-control-sample.md`
 - `docs/sessions/2026-04-04-release-acceptance-wrapup.md`
+
+## 2026-07-24 抖音 Docker daemon
+
+- 新增 `app.douyin_daemon` 独立无交互入口，未改写原有多平台 `main.py`。
+- 新增 YAML 配置校验、Cookie Secret 优先级、FFmpeg 进程注册表、健康状态和
+  分级优雅退出。
+- Docker 默认改为非 root 用户、只读根文件系统、Tini、TS 分段和 90 秒停止宽限期。
+- HTTP 客户端恢复 TLS 证书校验默认开启；仓库内抖音/抖音国际版长 Cookie 已清空。
+- 新增本地 FFmpeg 中断与 `ffprobe` 验证测试。

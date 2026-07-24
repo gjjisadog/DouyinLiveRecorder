@@ -90,7 +90,11 @@ class DockerReleaseTests(unittest.TestCase):
             self.assertIn(APP_VERSION, content)
             if relative_path.endswith(".yaml"):
                 self.assertIn(expected, content)
-                self.assertIn("DLR_WEB_PORT", content)
+                if relative_path == "docker-compose.yaml":
+                    self.assertIn("DOUYIN_CONFIG", content)
+                    self.assertNotIn("DLR_WEB_PORT", content)
+                else:
+                    self.assertIn("DLR_WEB_PORT", content)
             else:
                 self.assertIn("DLR_WEB_PORT=18091", content)
 
@@ -102,13 +106,15 @@ class DockerReleaseTests(unittest.TestCase):
         self.assertIn('- "18091:18091"', content)
         self.assertNotIn("build:", content)
 
-    def test_github_workflow_uses_release_module_for_docker_tags(self) -> None:
+    def test_github_workflow_publishes_edge_and_release_tags(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         content = (repo_root / ".github" / "workflows" / "build-image.yml").read_text(encoding="utf-8")
 
-        self.assertIn("client.infra.docker.release github-output", content)
-        self.assertIn("steps.resolve_docker_metadata.outputs.tags", content)
-        self.assertIn("steps.resolve_docker_metadata.outputs.platforms", content)
+        self.assertIn("docker/metadata-action@v5", content)
+        self.assertIn("type=raw,value=edge", content)
+        self.assertIn("type=raw,value=latest", content)
+        self.assertIn("linux/amd64,linux/arm64", content)
+        self.assertIn("sbom: true", content)
 
 
 if __name__ == "__main__":

@@ -628,3 +628,59 @@ docker compose stop
 
 ## 有问题可以提issue, 我会在这里持续添加更多直播平台的录制 欢迎Star
 #### 
+
+## 抖音 Docker 模式
+
+该模式面向 NAS 和 Linux 服务器长期无人值守运行，入口为
+`python -m app.douyin_daemon`。它只读取抖音 YAML 配置，不依赖终端、
+TTY 或 `input()`；原有 `python main.py` 多平台源码入口保持不变。
+
+### 1. 创建配置
+
+复制 `config/douyin.example.yaml` 为 `config/douyin.yaml`，然后修改
+`rooms`。支持直播间地址、主播主页地址和抖音短链接；解析后会按房间或
+主播标识去重。
+
+默认策略是 TS、每 1800 秒分段、直接封装 `-c copy`、不转 MP4、不删除
+源文件。TS 在网络中断或容器停止时比 MP4 更容易保留可播放的尾部；
+自动转 MP4 会额外占用 CPU、磁盘和后处理时间，因此 daemon 默认不做。
+
+### 2. 配置 Cookie Secret
+
+Cookie 的读取优先级为：
+
+1. `DOUYIN_COOKIE_FILE`
+2. `DOUYIN_COOKIE`
+3. YAML 中的 `cookie.value`
+
+推荐复制 `secrets/douyin_cookie.example.txt` 为宿主机私有文件，并设置：
+
+```bash
+DOUYIN_COOKIE_FILE_PATH=/绝对路径/douyin_cookie.txt docker compose up -d
+```
+
+不要把真实 Cookie 写入 YAML、镜像或 Git。日志只输出脱敏状态。
+
+### 3. 启动、检查与停止
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f --tail=200
+docker compose exec app python -m app.health check
+docker compose stop
+```
+
+录制文件保存在宿主机 `downloads/`，健康状态保存在 Docker 命名卷
+`douyin_state`。Linux/NAS 上应确保 `downloads/` 可由 UID 10001 写入。
+代理通过 `proxy.url` 设置。健康检查关注
+调度心跳、最近检测、目录可写性、剩余磁盘和 FFmpeg 连续崩溃，不会把
+单个主播未开播判为故障。
+
+收到 SIGTERM/SIGINT 后，daemon 会停止新检查和新录制，向全部 FFmpeg
+发送 SIGINT 并等待文件尾写入；超时后才依次 terminate 和 kill。
+Compose 为此保留 90 秒停止宽限期。
+
+发布镜像支持 `linux/amd64` 和 `linux/arm64`。主分支发布 `edge`；
+正式 `v*` Release 才发布版本标签和 `latest`。升级前应备份配置与下载
+目录，拉取固定版本标签，重新创建容器并检查健康状态。

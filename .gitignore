@@ -171,3 +171,5 @@ cython_debug/
 
 backup_config/
 .worktrees/
+secrets/*
+!secrets/douyin_cookie.example.txt

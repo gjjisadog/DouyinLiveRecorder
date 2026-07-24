@@ -116,3 +116,13 @@
     - `scripts/exe_automation_acceptance.py` 已对 `response.json` 的空 JSON / 半写 JSON / `PermissionError` 补重试
   - 当前剩余边界：
     - 若继续用该源，需要更长录制窗口
+
+## 抖音 Docker daemon
+
+- ARMv7 未声明支持；当前正式构建目标仅为 AMD64 和 ARM64。
+- Cookie 缺失时部分直播间或原画可能不可用，daemon 会告警但不会把 Cookie
+  内容写入日志。
+- 抖音风控返回结构可能随站点升级变化；当前解析继续复用 `src/spider.py`，
+  尚未建立覆盖所有风控响应的离线样本库。
+- 真实容器 `docker stop` 验收依赖本机 Docker daemon；本地自动化测试已覆盖
+  FFmpeg SIGINT 后 TS 可被 `ffprobe` 解析。

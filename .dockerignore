@@ -15,3 +15,11 @@ __pycache__
 *.log
 .pytest_cache
 .mypy_cache
+.worktrees
+.codex
+config/config.ini
+config/URL_config.ini
+secrets/*
+!secrets/douyin_cookie.example.txt
+*.tar
+*.ts

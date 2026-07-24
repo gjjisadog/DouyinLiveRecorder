@@ -1,0 +1,26 @@
+rooms:
+  - url: https://live.douyin.com/123456
+    name: 主播A
+    quality: original
+    enabled: true
+
+recorder:
+  format: ts
+  segment_seconds: 1800
+  poll_seconds: 120
+  max_concurrent_checks: 3
+  stream_protocol: auto
+
+storage:
+  path: /data/downloads
+  state_path: /data/state
+  min_free_gb: 10
+
+proxy:
+  url: ""
+
+cookie:
+  value: ""
+
+notifications:
+  enabled: false
