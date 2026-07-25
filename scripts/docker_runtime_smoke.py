@@ -252,6 +252,18 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     if unauthenticated.returncode != 0:
         raise RuntimeError("NAS management page did not require authentication")
 
+    wait_until(
+        "initial daemon room check",
+        lambda: (
+            (
+                initial_state := json.loads(
+                    (root / "state" / "health.json").read_text(encoding="utf-8")
+                )
+            ).get("configured_rooms")
+            == 1
+            and float(initial_state.get("last_check_at") or 0) > 0
+        ),
+    )
     before_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     page_request = urllib.request.Request(
