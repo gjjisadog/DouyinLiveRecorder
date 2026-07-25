@@ -65,6 +65,7 @@ not_record_list = []
 start_display_time = datetime.datetime.now()
 global_proxy = False
 recording_time_list = {}
+headless_mode = os.environ.get('DLR_HEADLESS', '').strip().lower() in {'1', 'true', 'yes', 'on'}
 script_path = os.path.split(os.path.realpath(sys.argv[0]))[0]
 config_file = f'{script_path}/config/config.ini'
 url_config_file = f'{script_path}/config/URL_config.ini'
@@ -1793,6 +1794,9 @@ while True:
                 ini_URL_content = file.read().strip()
 
         if not ini_URL_content.strip():
+            if headless_mode or not sys.stdin.isatty():
+                logger.error("URL_config.ini 为空，当前处于无交互模式，请先在配置文件中写入要录制的直播间地址。")
+                sys.exit(1)
             input_url = input('请输入要录制的主播直播间网址（尽量使用PC网页端的直播间地址）:\n')
             with open(url_config_file, 'w', encoding=text_encoding) as file:
                 file.write(input_url)

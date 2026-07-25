@@ -1,54 +1,105 @@
-name: Build and Push Docker Image
+name: Build and publish Docker image
 
 on:
   push:
-    tags:
-      - '*'
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag name for the Docker image'
-        required: false
-        default: 'latest'
+
+env:
+  IMAGE_NAME: ihmily/douyin-live-recorder
 
 jobs:
-  build_and_push:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.lock pytest==8.3.5
+      - name: Run daemon unit and integration tests
+        run: python -m pytest tests -v
+      - name: Validate Python entrypoints
+        run: python -m py_compile main.py app/*.py
+      - name: Validate Compose
+        run: docker compose config
+      - name: Build Dockerfile smoke image
+        run: docker build -t douyin-recorder:ci .
 
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          registry: docker.io
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push AMD64/ARM64
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
           push: true
-          tags: |
-            ihmily/douyin-live-recorder:${{ github.event.inputs.tag_name || github.ref_name }} 
-            ihmily/douyin-live-recorder:latest
           platforms: linux/amd64,linux/arm64
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+      - name: Scan published image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  armv7-experimental:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build experimental ARMv7 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/arm/v7
+          cache-from: type=gha,scope=armv7
+          cache-to: type=gha,mode=max,scope=armv7

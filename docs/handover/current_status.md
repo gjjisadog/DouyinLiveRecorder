@@ -1,0 +1,387 @@
+# 当前状态
+
+最后更新：2026-04-10
+
+## 2026-04-05 Docker 配置页
+- Docker / NAS 部署现在会同时启动一个轻量配置网页，用于直接管理 `config/URL_config.ini`。
+- 容器入口从 `python main.py` 调整为 `python -m client.infra.docker.launcher`：
+  - 后台继续拉起 `python main.py`
+  - 同时提供 Web 配置页
+- Compose 已新增 `DLR_WEB_PORT` 环境变量和端口映射，默认网页地址为 `http://localhost:18091`，NAS 场景使用 `http://NAS_IP:18091`。
+- 新增代码：
+  - `client/infra/docker/config_web.py`
+  - `client/infra/docker/launcher.py`
+- 新增回归测试：
+  - `client.tests.test_docker_config_web`
+  - 已同步扩展 `client.tests.test_docker_release`
+- 已验证：
+  - `& '.\.client-conda-env\python.exe' -m unittest client.tests.test_docker_config_web client.tests.test_docker_healthcheck client.tests.test_docker_release client.tests.test_flyinnas_deploy -v`
+  - `& '.\.client-conda-env\python.exe' -m py_compile client\infra\docker\config_web.py client\infra\docker\launcher.py client\tests\test_docker_config_web.py`
+
+## 2026-04-08 飞牛导入镜像
+- Dockerfile 已调整为更适合持续重建的缓存结构：
+  - 先复制 `requirements.docker.txt`
+  - 先安装系统依赖 / pip 依赖
+  - 最后再复制仓库代码
+- 已成功构建固定镜像标签：`douyin-live-recorder:4.0.7-fnos-webui`
+- 已新增适合飞牛 Docker UI 导入的 Compose 文件：
+  - `docker-compose.flyinnas.import.yaml`
+- 该文件特征：
+  - 不包含 `build:`
+  - 使用固定端口 `18091:18091`
+  - 使用绝对路径 `/vol1/docker/douyin-live-recorder/...`
+- 已通过临时容器验证该固定镜像在空配置下可保持：
+  - 容器 `Up`
+  - 健康检查 `healthy`
+  - Web 配置页常驻
+
+## 2026-04-10 Docker 日志控制台
+- Docker / NAS Web 管理页已从“仅配置页”扩展为“双页签入口”：
+  - `/`：主播配置
+  - `/logs`：日志控制台
+- 日志控制台当前固定读取容器挂载目录 `/app/logs` 下的：
+  - `streamget.log`
+  - `PlayURL.log`
+- 设计上保持只读，不提供 shell，避免把容器终端能力直接暴露给 NAS 面板入口。
+- 已补充测试覆盖：
+  - `client.tests.test_docker_config_web`
+  - `client.tests.test_docker_healthcheck`
+- 当前飞牛 / FN Connect 推荐入口：
+  - `http://NAS_IP:18091`
+  - `http://NAS_IP:18091/logs`
+
+## 已确认
+- 仓库当前同时包含两条主线：
+  - 旧版 CLI / 脚本录制主线：`main.py`、`src/`
+  - 新版 PySide6 客户端主线：`client/`
+- 客户端主窗口、任务页、设置页、历史页、日志页、通知、调度、托盘、任务持久化都已落地。
+- 打包版客户端 `dist/DouyinLiveRecorder Client/DouyinLiveRecorder Client.exe` 可真实启动。
+- 打包版自动化主路径已切换为“进程内文件桥”：
+  - 环境变量：`DLR_AUTOMATION_DIR`
+  - 请求文件：`request.json`
+  - 响应文件：`response.json`
+- 文件桥当前已支持：
+  - `ping`
+  - `add_task`
+  - `edit_task`
+  - `delete_task`
+  - `import_tasks`
+  - `export_tasks`
+  - `start_task`
+  - `stop_task`
+  - `list_tasks`
+  - `list_history`
+  - `list_tabs`
+  - `set_current_tab`
+  - `get_logs`
+  - `clear_logs`
+- `scripts/exe_automation_acceptance.py` 已可对打包版 EXE 做真实验收，并支持：
+  - 自定义 `--max-file-size-gb`
+  - 录制期间主动轮询 `list_tasks` / `list_history`
+  - 汇总输出文件、阈值、超限偏差和是否发生切段
+- 2026-04-03 已完成 `BL-014` 修复并通过打包版复验：
+  - 修复 `%03d` 模板路径导致的大小检测失效
+  - 修复历史记录写模板路径的问题
+  - 20 秒小阈值观察内自动切出 3 段
+- 2026-04-03 已完成 `BL-015` 更长时间边界观察：
+  - 产物：`tmp_bl015_long_run_observation/acceptance_summary.json`
+  - 参数：`record_seconds=75`、`max_file_size_gb=0.001`
+  - 结果：75 秒内稳定切出 3 段，`rollover_detected=true`
+  - 历史记录稳定增长到 3 条，`file_path` 均为实际 `_000.ts` 文件路径
+  - 3 段文件大小：
+    - `1901432`
+    - `1877744`
+    - `736960`
+  - 阈值：`1073741` bytes
+  - 最大超限偏差：`827691` bytes
+- 2026-04-03 已完成 `BL-016` 按大小切段阈值精度修正：
+  - 代码：
+    - `client/ui/pages/tasks_page.py`
+    - `client/core/ffmpeg_service.py`
+  - 回归测试：
+    - `client.tests.test_core_services`
+    - `client.tests.test_task_import_export`
+    - `client.tests.test_main_window_runtime`
+    - `client.tests.test_automation_bridge`
+  - 打包版复验：
+    - `tmp_bl016_precision_tuning/acceptance_summary.json`
+    - `tmp_bl016_guard_band_validation/acceptance_summary.json`
+  - 已确认根因：
+    - 仅降低 UI 轮询间隔，超限偏差只从 `827691` bytes 降到 `804755` bytes
+    - 活跃段文件在录制中按 `262144` bytes 台阶落盘，关闭段文件时会集中补刷，导致运行中磁盘大小低估
+  - 已落地修正：
+    - 任务页运行态同步改为 `500ms` 精确定时器
+    - 大小判断补“提前切段安全余量”，避免等待磁盘大小精确达到阈值才切
+  - 当前验证结果：
+    - `0.001 GB` / 75 秒打包样本内连续切段成功
+    - 输出段数增加到 12 段
+    - `max_overshoot_bytes = 0`
+- 2026-04-03 已完成 `BL-018` 缩比近真阈值长时观察：
+  - 产物：`tmp_bl018_near_real_threshold/acceptance_summary.json`
+  - 参数：`record_seconds=420`、`max_file_size_gb=0.01`
+  - 说明：这是“接近真实目标但可在当前会话内完成”的缩比样本，不是真实 `1 GB` 全量观察
+  - 结果：
+    - 420 秒内切出 4 段
+    - 前 3 段大小分别为：
+      - `10897420`
+      - `10897420`
+      - `11041240`
+    - 阈值：`10737418` bytes
+    - 最大超限偏差：`303822` bytes
+    - 最大超限占比：约 `2.83%`
+  - 当前结论：
+    - `BL-016` 的安全余量策略在更接近真实阈值的样本上仍有效
+    - 相比 `0.001 GB` 压力样本，切段频率明显回落，不再出现“75 秒切 12 段”的极端情况
+- 2026-04-03 `BL-019` 已完成本地连续流长测样本：
+  - 公网流样本：
+    - `tmp_bl019_real_1gb_run1/` 已确认无效：默认 `split_seconds=1800`，先被 30 分钟时间切段触发
+    - `tmp_bl019_real_1gb_run2/` 已确认不适合作为最终依据：
+      - 前两段分别约 `766240060` bytes、`814726576` bytes
+      - `history.json` 中状态为 `completed`
+      - 说明公网流会在未达到 `1 GB` 前自然结束并被客户端重拉
+  - 验证脚本已补齐：
+    - `scripts/exe_automation_acceptance.py` 新增 `--split-seconds`
+    - `prepare_workspace()` 已支持外部传入 `split_seconds`
+    - `acceptance_summary.json` 已记录 `split_seconds`
+  - 本地长时流源已落地：
+    - 新增 `scripts/local_hls_test_source.py`
+    - 当前本地流地址：`http://127.0.0.1:18080/stream.m3u8`
+    - 已用本地流完成一轮打包版冒烟：
+      - 产物：`tmp_bl019_local_source_smoke/acceptance_summary.json`
+      - 参数：`record_seconds=35`、`max_file_size_gb=1.0`、`split_seconds=86400`
+      - 结果：`success=true`，单段录制文件 `111712796` bytes，证明“本地源 -> 直链 m3u8 -> 打包 EXE -> 录制”链路有效
+  - 本地正式样本：
+    - 工作区：`tmp_bl019_local_source_1gb_run1/`
+    - 启动时间：`2026-04-03 17:50:44`
+    - 参数：`record_seconds=900`、`max_file_size_gb=1.0`、`split_seconds=86400`、`poll_interval=5`
+    - 结果文件：`tmp_bl019_local_source_1gb_run1/acceptance_summary.json`
+    - 结果：
+      - `success=true`
+      - `rollover_detected=true`
+      - 共生成 3 段，其中前 2 段为按大小自动切段，最后 1 段由测试结束主动停止
+      - 段大小：
+        - `1073444092`
+        - `1075609664`
+        - `645593504`
+      - 阈值：`1073741824` bytes
+      - `max_overshoot_bytes = 1867840`
+      - 最大超限占比约 `0.17%`
+      - 录制日志已明确出现两次“录制文件已达到单文件上限，准备自动切换新文件”
+- 2026-04-04 已完成 `BL-017` 打包版 `get_logs` 稳定性专项观察：
+  - 新增专项脚本：`scripts/exe_get_logs_stability.py`
+  - 脚本能力：
+    - 自动启动本地 HLS 连续流源
+    - 自动挑选空闲本地端口并探活 `.m3u8`
+    - 在录制过程中循环调用 `get_logs`
+    - 汇总成功率、延迟和失败明细到 `acceptance_summary.json`
+  - 有效样本：
+    - `tmp_bl017_get_logs_stability_run1/acceptance_summary.json`
+      - `record_seconds=90`
+      - `query_interval=2`
+      - `40/40` 次 `get_logs` 成功
+      - `max_latency_ms = 403.82`
+      - `avg_latency_ms = 252.19`
+    - `tmp_bl017_get_logs_stability_run3/acceptance_summary.json`
+      - `record_seconds=60`
+      - `query_interval=1`
+      - `49/49` 次 `get_logs` 成功
+      - `max_latency_ms = 402.4`
+      - `avg_latency_ms = 246.4`
+    - `tmp_bl017_get_logs_stability_run4/acceptance_summary.json`
+      - 这是脚本加固后的短样本
+      - `record_seconds=20`
+      - `query_interval=1`
+      - `16/16` 次 `get_logs` 成功
+      - `max_latency_ms = 406.09`
+      - `avg_latency_ms = 252.78`
+  - 结论：
+    - 当前打包版自动化链路下，`get_logs` 未复现 BL-013 中的超时
+    - 两轮长样本加一轮短样本合计 `105/105` 次调用成功
+    - 可将 `BL-017` 视为已完成
+- 2026-04-04 已确认当前 `1 MB` 安全余量不再继续微调：
+  - 依据：`tmp_bl019_local_source_1gb_run1/acceptance_summary.json`
+  - 当前结果：
+    - `1 GB` 切段链路已真实可用
+    - 最大超限 `1867840` bytes，约 `0.17%`
+  - 当前决策：
+    - 接受现状，不再继续做阈值安全余量调优
+- 2026-04-04 已完成“发布前验收说明”收口：
+  - 文档：`CLIENT_RELEASE.md`
+  - 已将 `BL-019` 与 `BL-017` 的最终证据写入统一发布说明
+  - 后续发包或交接时不需要再从 session 文档手工拼装结论
+- 2026-04-04 已完成 `BL-020` 外部长时源对照样本：
+  - 对照源：`https://abcnews-streams.akamaized.net/hls/live/2023566/abcnewshudson7/master_4000.m3u8`
+  - 工作区：`tmp_bl020_external_control_abc_run1/`
+  - 结果文件：`tmp_bl020_external_control_abc_run1/acceptance_summary.json`
+  - 参数：
+    - `record_seconds=600`
+    - `max_file_size_gb=0.01`
+    - `split_seconds=86400`
+    - `poll_interval=5`
+  - 结果：
+    - `success=true`
+    - `rollover_detected=true`
+    - 共 4 段，其中前 3 段为按大小自动切段，最后 1 段为测试结束主动停止
+    - 段大小：
+      - `9744604`
+      - `9750808`
+      - `9776000`
+      - `71816`
+    - 阈值：`10737418` bytes
+    - `max_overshoot_bytes = 0`
+    - 录制日志出现 3 次“录制文件已达到单文件上限，准备自动切换新文件”
+  - 当前结论：
+    - 外部长时源在 10 分钟样本内未出现“未达阈值先自然结束”的问题
+    - 当前切段策略不仅在本地连续流下可用，在外部真实新闻流样本下也可稳定工作
+- 2026-04-05 已完成 `BL-021` 外部长时真实 `1 GB` 全量样本：
+  - 样本源：`https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8`
+  - 工作区：`tmp_bl021_external_real_1gb_run1/`
+  - 结果文件：`tmp_bl021_external_real_1gb_run1/acceptance_summary.json`
+  - 参数：
+    - `record_seconds=4500`
+    - `max_file_size_gb=1.0`
+    - `split_seconds=86400`
+    - `poll_interval=10`
+  - 结果：
+    - `success=true`
+    - `rollover_detected=true`
+    - 共 2 段
+    - 第一段大小：`1072987252`
+    - 第二段大小：`392916052`
+    - 阈值：`1073741824` bytes
+    - `max_overshoot_bytes = 0`
+    - 第一段状态为 `completed`
+    - 第二段为测试结束后的 `stopped`
+    - 日志在 `2026-04-05 00:18:00` 明确出现“录制文件已达到单文件上限，准备自动切换新文件”
+  - 当前结论：
+    - 外部长时公开新闻流下，真实 `1 GB` 按大小自动切段已被打包版客户端真实触发
+    - 这轮样本没有出现“未达阈值先自然结束再重拉”的问题
+- 2026-04-05 已完成 `BL-022` 外部源 `get_logs` 对照样本：
+  - 样本源：`https://live.corusdigitaldev.com/groupb/live/3062d0e3-ed4c-4f47-8482-95648250f4b8/live.isml/live-audio_1=96000-video=2499968.m3u8`
+  - 工作区：`tmp_bl022_external_get_logs_run1/`
+  - 结果文件：`tmp_bl022_external_get_logs_run1/acceptance_summary.json`
+  - 参数：
+    - `record_seconds=300`
+    - `query_interval=1`
+    - `query_timeout=12`
+    - `log_limit=200`
+  - 结果：
+    - `success=true`
+    - `total_calls=240`
+    - `successful_calls=240`
+    - `failed_calls=0`
+    - `max_latency_ms = 404.22`
+    - `avg_latency_ms = 250.36`
+  - 当前结论：
+    - 外部公开新闻源录制过程中，`get_logs` 同样稳定
+    - 当前文件桥下的 `get_logs` 已同时在本地连续流和外部公开新闻流样本上通过
+- 2026-04-05 已完成 `BL-024` 第二条外部源 `get_logs` 对照样本：
+  - 样本源：`https://ndtv24x7elemarchana.akamaized.net/hls/live/2003678/ndtv24x7/masterp_720p@3.m3u8`
+  - 工作区：`tmp_bl024_external_get_logs_run3/`
+  - 结果文件：`tmp_bl024_external_get_logs_run3/acceptance_summary.json`
+  - 参数：
+    - `record_seconds=300`
+    - `query_interval=1`
+    - `query_timeout=12`
+    - `log_limit=200`
+  - 结果：
+    - `success=true`
+    - `total_calls=241`
+    - `successful_calls=241`
+    - `failed_calls=0`
+    - `max_latency_ms = 404.53`
+    - `avg_latency_ms = 248.87`
+  - 当前结论：
+    - `get_logs` 现在已不只覆盖 Global News 一条公开新闻源
+    - 文件桥下的 `get_logs` 已同时具备本地连续流、Global News、NDTV 三档稳定性证据
+- 2026-04-05 已补两类自动化健壮性修正，并已重打包客户端：
+  - 文件桥 JSON 读写：
+    - `client/infra/process/automation_bridge.py`
+    - `scripts/exe_automation_acceptance.py`
+    - 已补原子写入与脚本侧对空 JSON / 半写 JSON / 临时文件锁的重试
+  - 带 query 的直链 HLS 识别：
+    - `client/core/platform_router.py`
+    - `client/core/stream_resolver.py`
+    - 已确认 `.m3u8?token=...` / `.flv?...` 不再误判为 `unknown`
+  - 当前打包产物已重建：
+    - `dist/DouyinLiveRecorder Client/DouyinLiveRecorder Client.exe`
+- 2026-04-05 已启动 `BL-023` 第二条外部长时真实 `1 GB` 全量样本探索，但尚未收口：
+  - 已确认可录制的第二外部源候选：
+    - `23 ABC / Uplynk`：`https://content-aaps1.uplynk.com/channel/ff809e6d9ec34109abfb333f0d4444b5/e.m3u8?pbs=e04cf259abd74d78974428201d237b41`
+  - 已完成短样本：
+    - `tmp_bl023_external_uplynk_probe2/acceptance_summary.json`
+    - `120s` 产物大小：`29022500` bytes
+    - 说明该源在当前时段真实落盘速率明显低于 playlist 标称码率
+  - 已完成一轮长样本尝试：
+    - `tmp_bl023_external_real_1gb_run2/acceptance_summary.json`
+    - 中断前单段文件大小：`591921152` bytes
+    - 中断原因：脚本读取 `response.json` 时命中 Windows 文件锁
+    - 该问题已由本轮脚本重试补丁覆盖，但这轮样本本身未跑到 `1 GB`
+  - 当前边界：
+    - 第二条外部长时真实 `1 GB` 样本仍未完成
+    - 若继续使用 `23 ABC / Uplynk`，需要比当前 `5100s` 更长的录制窗口
+- 2026-04-04 已完成提交前最小回归收口：
+  - 通过：`client.tests.test_core_services`
+  - 通过：`client.tests.test_task_import_export`
+  - 通过：`py_compile client/core/ffmpeg_service.py client/core/record_worker.py client/ui/pages/tasks_page.py scripts/exe_automation_acceptance.py scripts/exe_get_logs_stability.py scripts/local_hls_test_source.py`
+- 两个 ACL 异常目录 `tmp7qf85p61/`、`tmpbape0idz/` 当前已不存在。
+
+## 关键推断
+- 当前“按单文件大小自动切段”在真实打包链路下已恢复可用，连续多轮切段和历史落档是稳定的。
+- 外部长时新闻流样本进一步说明：当前切段链路不依赖本地自建流源，已能在更接近真实业务流的网络条件下稳定复现。
+- `BL-021` 进一步确认：当前链路不只是在外部 `0.01 GB` 缩比样本下可用，而是在公开外部长时源上真实跑到 `1 GB` 并完成自动切段。
+- 当前文件桥下的 `get_logs` 在本地连续流与外部公开新闻流样本中都表现稳定，常态响应约 `200ms`，部分轮次约 `400ms`，未出现超时或失败。
+- BL-016 证明此前的大偏差不只是轮询频率问题，更关键的是 ffmpeg 段文件在运行时的磁盘可见大小滞后于最终落盘大小。
+- 当前启发式安全余量已经能把小阈值压力样本压到“不超限”，但这会让极小阈值样本更早切段、段数更多。
+- BL-018 进一步表明：当阈值提高到 `0.01 GB` 这一档时，当前策略的切段频率已回到可接受区间，超限也保持在较低占比。
+
+## 待确认
+- 除 Global News 这条公开外部源外，其他外部长时源在真实 `1 GB` 阈值下是否同样稳定。
+- 除 Global News 这条公开外部源外，其他外部源录制过程中，`get_logs` 是否也能保持同等稳定度。
+
+## 建议先看
+- `README.md`
+- `CLIENT_TASK_TRACKER.md`
+- `client/core/ffmpeg_service.py`
+- `client/core/record_worker.py`
+- `client/infra/process/automation_bridge.py`
+- `client/ui/main_window.py`
+- `scripts/exe_automation_acceptance.py`
+- `docs/sessions/2026-04-03-bl014-rollover-fix-validation.md`
+- `docs/sessions/2026-04-03-bl015-long-run-observation.md`
+- `docs/sessions/2026-04-03-bl016-size-rollover-guard-band.md`
+- `docs/sessions/2026-04-03-bl018-near-real-threshold-observation.md`
+- `docs/sessions/2026-04-03-bl019-real-1gb-launch.md`
+- `docs/sessions/2026-04-03-bl019-test-source-switch.md`
+- `docs/sessions/2026-04-04-bl017-get-logs-stability.md`
+- `docs/sessions/2026-04-05-bl021-external-real-1gb.md`
+- `docs/sessions/2026-04-05-bl022-external-get-logs.md`
+- `docs/sessions/2026-04-04-bl020-external-control-sample.md`
+- `docs/sessions/2026-04-04-release-acceptance-wrapup.md`
+
+## 2026-07-24 抖音 Docker daemon
+
+- 新增 `app.douyin_daemon` 独立无交互入口，未改写原有多平台 `main.py`。
+- 新增 YAML 配置校验、Cookie Secret 优先级、FFmpeg 进程注册表、健康状态和
+  分级优雅退出。
+- Docker 默认改为非 root 用户、只读根文件系统、Tini、TS 分段和 90 秒停止宽限期。
+- HTTP 客户端恢复 TLS 证书校验默认开启；仓库内抖音/抖音国际版长 Cookie 已清空。
+- 新增本地 FFmpeg 中断与 `ffprobe` 验证测试。
+
+## 2026-07-25 daemon 长期运行增强
+
+- 短链接和主页解析后的稳定主播标识会原子持久化，并在后续轮询中跨 URL 去重。
+- 新增默认关闭的 MP4 remux 队列，支持 1–4 个 worker，使用流复制且仅在成功后
+  可选删除 TS。
+- 新增旧 INI 到 YAML + Cookie Secret 的迁移入口。
+- 状态卷会保存脱敏、限量的解析失败分类样本，覆盖 Cookie 失效、风控、网络和
+  其他解析错误。
+- ARMv7 镜像已在 buildx/QEMU 下完整构建，容器内确认 `armv7l`、FFmpeg 5.1.9、
+  Node 18.20.4 与 ExecJS/daemon 导入正常；CI 新增允许失败的实验构建，不发布标签。
+- 真实 NAS 隔离实例已于 2026-07-25 08:58（Asia/Shanghai）以最终镜像启动在
+  `/vol1/docker/douyin-daemon-24h`；首轮检查完成、0 次解析失败、容器 healthy。
+  旧 `douyin-live-recorder` 容器仍保持三个月前的 exited 状态，未被覆盖或启动。
+- 09:48 从抖音公开热门页选择并实时解析验证 2 个测试房间，以 SD 画质加入隔离配置；
+  当前共调度 3 个房间，其中 2 个 FFmpeg 正在录制。09:50 心跳显示
+  `active_recordings=2`、解析失败 0、容器 healthy、重启 0。
+- 全仓测试目前为 140 项通过；新增 daemon 定向测试为 34 项通过。

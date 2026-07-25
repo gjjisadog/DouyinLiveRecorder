@@ -69,6 +69,19 @@
 
 </div>
 
+## 🧩客户端当前已迁移平台（2026-04-01）
+
+- 本节仅描述 `client/` PySide6 客户端当前已接入的范围，**不等同于**上方旧版主程序 / CLI 的完整平台清单。
+- 当前已接入 `client/core/platform_router.py` 与 `client/core/stream_resolver.py` 的客户端平台为：
+  - 抖音、TikTok、快手、虎牙、斗鱼、YY、B站、网易 CC、千度热播、PandaTV、百度直播、ShowRoom、CHZZK
+  - 以及自定义 `m3u8` / `flv` 直链录制
+- 当前已确认的客户端自动化验证范围：
+  - 路由识别：网易 CC、千度热播、PandaTV、百度直播、ShowRoom、CHZZK
+  - 解析分支：网易 CC、CHZZK
+  - 任务导入 / 展示 / 持久化：抖音、TikTok、快手、ShowRoom、CHZZK
+  - 录制链路烟测：自定义 `m3u8` 直链
+- 如需继续补齐“客户端已验证平台矩阵”，请优先查看 `docs/handover/executable_backlog.md` 与 `docs/sessions/2026-04-01-platform-coverage-bl005.md`。
+
 ## 🎈项目结构
 
 ```
@@ -109,6 +122,9 @@
 - 以上步骤都做好后，就可以运行`DouyinLiveRecorder.exe` 程序进行录制了。录制的视频文件保存在同目录下的 `downloads` 文件夹内。
 
 - 另外，如果需要录制TikTok、AfreecaTV等海外平台，请在配置文件中设置开启代理并添加proxy_addr链接 如：`127.0.0.1:7890` （这只是示例地址，具体根据实际填写）。
+- 建议把仓库里的 `config/config.example.ini`、`config/URL_config.example.ini` 作为公开样板；本地真实使用时复制为 `config/config.ini`、`config/URL_config.ini` 后再填写自己的 Cookie、推送 token、账号密码与直播间地址。
+- `config/config.ini` 可能包含 Cookie、推送接口、SMTP 授权码、平台账号密码等敏感信息；共享仓库、截图或日志前请先脱敏。
+- 如需校验公开样板没有落后于真实配置，可执行 `& '.\.client-conda-env\python.exe' scripts/check_config_examples.py`。
 
 - 假如`URL_config.ini`文件中添加的直播间地址，有个别直播间暂时不想录制又不想移除链接，可以在对应直播间的链接开头加上`#`，那么将停止该直播间的监测以及录制。
 
@@ -287,7 +303,7 @@ https://www.picarto.tv/cuteavalanche
 &emsp;
 
 ## 🎃源码运行
-使用源码运行，可参考下面的步骤。
+使用源码运行，前提要有**Python>=3.10**环境，如果没有请先自行安装Python，再执行下面步骤。
 
 1.首先拉取或手动下载本仓库项目代码
 
@@ -299,93 +315,8 @@ git clone https://github.com/ihmily/DouyinLiveRecorder.git
 
 ```bash
 cd DouyinLiveRecorder
+pip3 install -r requirements.txt
 ```
-
-> [!TIP]
-> - 不论你是否已安装 **Python>=3.10** 环境, 都推荐使用 [**uv**](https://github.com/astral-sh/uv) 运行, 因为它可以自动管理虚拟环境和方便地管理 **Python** 版本, **不过这完全是可选的**<br />
-> 使用以下命令安装
->    ```bash
->    # 在 macOS 和 Linux 上安装 uv
->    curl -LsSf https://astral.sh/uv/install.sh | sh
->    ```
->    ```powershell
->    # 在 Windows 上安装 uv
->    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
->    ```
-> - 如果安装依赖速度太慢, 你可以考虑使用国内 pip 镜像源:<br />
-> 在 `pip` 命令使用 `-i` 参数指定, 如 `pip3 install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`<br />
-> 或者在 `uv` 命令 `--index` 选项指定, 如 `uv sync --index https://pypi.tuna.tsinghua.edu.cn/simple`
-
-<details>
-
-  <summary>如果已安装 <b>Python>=3.10</b> 环境</summary>
-
-  - :white_check_mark: 在虚拟环境中安装 (推荐)
-  
-    1. 创建虚拟环境
-
-       - 使用系统已安装的 Python, 不使用 uv
-  
-         ```bash
-         python -m venv .venv
-         ```
-
-       - 使用 uv, 默认使用系统 Python, 你可以添加 `--python` 选项指定 Python 版本而不使用系统 Python [uv官方文档](https://docs.astral.sh/uv/concepts/python-versions/)
-       
-         ```bash
-         uv venv
-         ```
-    
-    2. 在终端激活虚拟环境 (在未安装 uv 或你想要手动激活虚拟环境时执行, 若已安装 uv, 可以跳过这一步, uv 会自动激活并使用虚拟环境)
-   
-       **Bash** 中
-       ```bash
-       source .venv/Scripts/activate
-       ```
-
-       **Powershell** 中
-       ```powershell
-       .venv\Scripts\activate.ps1
-       ```
-       
-       **Windows CMD** 中
-       ```bat
-       .venv\Scripts\activate.bat
-       ```
-
-    3. 安装依赖
-   
-       ```bash
-       # 使用 pip (若安装太慢或失败, 可使用 `-i` 指定镜像源)
-       pip3 install -U pip && pip3 install -r requirements.txt
-       # 或者使用 uv (可使用 `--index` 指定镜像源)
-       uv sync
-       # 或者
-       uv pip sync requirements.txt
-       ```
-
-  - :x: 在系统 Python 环境中安装 (不推荐)
-  
-    ```bash
-    pip3 install -U pip && pip3 install -r requirements.txt
-    ```
-
-</details>
-
-<details>
-
-  <summary>如果未安装 <b>Python>=3.10</b> 环境</summary>
-
-  你可以使用 [**uv**](https://github.com/astral-sh/uv) 安装依赖
-   
-  ```bash
-  # uv 将使用 3.10 及以上的最新 python 发行版自动创建并使用虚拟环境, 可使用 --python 选项指定 python 版本, 参见 https://docs.astral.sh/uv/reference/cli/#uv-sync--python 和 https://docs.astral.sh/uv/reference/cli/#uv-pip-sync--python
-  uv sync
-  # 或
-  uv pip sync requirements.txt
-  ```
-
-</details>
 
 3.安装[FFmpeg](https://ffmpeg.org/download.html#build-linux)，如果是Windows系统，这一步可跳过。对于Linux系统，执行以下命令安装
 
@@ -419,12 +350,6 @@ brew install ffmpeg
 
 ```python
 python main.py
-
-```
-或
-
-```bash
-uv run main.py
 ```
 
 其中Linux系统请使用`python3 main.py` 运行。
@@ -436,37 +361,63 @@ uv run main.py
 
 1.快速启动
 
-最简单方法是运行项目中的 [docker-compose.yaml](https://github.com/ihmily/DouyinLiveRecorder/blob/main/docker-compose.yaml) 文件，只需简单执行以下命令：
+最简单方法是直接使用项目中的 [docker-compose.yaml](https://github.com/ihmily/DouyinLiveRecorder/blob/main/docker-compose.yaml) 文件。当前 Compose 默认会构建当前仓库代码，并使用固定版本标签：
 
 ```bash
-docker-compose up
+docker compose up -d --build
 ```
 
-可选 `-d` 在后台运行。
+Docker 部署默认会同时开启一个轻量配置页，浏览器访问 `http://localhost:18091` 即可直接增删、停用和批量编辑主播列表。
 
-
-
-2.构建镜像(可选)
-
-如果你只想简单的运行程序，则不需要做这一步。Docker镜像仓库中代码版本可能不是最新的，如果要运行本仓库主分支最新代码，可以本地自定义构建，通过修改 [docker-compose.yaml](https://github.com/ihmily/DouyinLiveRecorder/blob/main/docker-compose.yaml) 文件，如将镜像名修改为 `douyin-live-recorder:latest`，并取消 `# build: .` 注释，然后再执行
+可选先复制 `.env.docker.example` 为 `.env`，覆盖镜像仓库名或版本标签：
 
 ```bash
-docker build -t douyin-live-recorder:latest .
-docker-compose up
+cp .env.docker.example .env
 ```
 
-或者直接使用下面命令进行构建并启动
+如需修改网页端口，可在 `.env` 中设置：
 
 ```bash
-docker-compose -f docker-compose.yaml up
+DLR_WEB_PORT=18091
 ```
 
+2.本地构建镜像(可选)
 
-
-3.停止容器实例
+如果你只想在本地提前构建镜像，也可以直接执行：
 
 ```bash
-docker-compose stop
+docker build -t douyin-live-recorder:4.0.7 .
+docker compose up -d
+```
+
+配置页默认同样监听 `18091` 端口；如果宿主机端口冲突，请同步修改 `.env` 里的 `DLR_WEB_PORT`。
+
+3.buildx 多架构发布(可选)
+
+仓库内已提供统一的多架构发布入口，镜像标签默认跟随 `client/version.py` 中的版本号：
+
+PowerShell:
+
+```powershell
+.\build_docker_release.ps1 --repository ihmily/douyin-live-recorder --push
+```
+
+批处理:
+
+```bat
+build_docker_release.bat --repository ihmily/douyin-live-recorder --push
+```
+
+也可以直接调用 Python 模块，先预览 buildx 命令：
+
+```bash
+python -m client.infra.docker.release buildx --repository ihmily/douyin-live-recorder --push --dry-run
+```
+
+4.停止容器实例
+
+```bash
+docker compose stop
 ```
 
 
@@ -677,3 +628,80 @@ docker-compose stop
 
 ## 有问题可以提issue, 我会在这里持续添加更多直播平台的录制 欢迎Star
 #### 
+
+## 抖音 Docker 模式
+
+该模式面向 NAS 和 Linux 服务器长期无人值守运行，入口为
+`python -m app.douyin_daemon`。它只读取抖音 YAML 配置，不依赖终端、
+TTY 或 `input()`；原有 `python main.py` 多平台源码入口保持不变。
+
+### 1. 创建配置
+
+复制 `config/douyin.example.yaml` 为 `config/douyin.yaml`，然后修改
+`rooms`。支持直播间地址、主播主页地址和抖音短链接；解析后会按房间或
+主播标识去重。解析成功后的稳定主播标识会持久化到
+`state/room_identities.json`，短链接重定向变化不会在后续轮询中造成重复检查。
+
+默认策略是 TS、每 1800 秒分段、直接封装 `-c copy`、不转 MP4、不删除
+源文件。TS 在网络中断或容器停止时比 MP4 更容易保留可播放的尾部；
+自动转 MP4 会额外占用 CPU、磁盘和后处理时间，因此 daemon 默认不做。
+如确有播放器兼容需求，可设置 `recorder.remux_to_mp4: true`；
+`remux_workers` 限制并发数（1–4），`delete_source_after_remux` 决定成功后
+是否删除 TS。建议 NAS 从 1 个 worker 起步，并保留 TS。
+
+旧版配置可在容器内迁移，Cookie 会单独写入 Secret 文件，不进入 YAML：
+
+```bash
+python -m app.migrate_legacy \
+  --url-config config/URL_config.ini \
+  --legacy-config config/config.ini \
+  --output-config config/douyin.yaml \
+  --output-cookie secrets/douyin_cookie
+```
+
+若在容器内以 root 迁移，额外传入 `--cookie-uid 10001`，生成的 Secret 会归
+录制用户所有并保持 `0400`，避免非 root daemon 无法读取。
+
+### 2. 配置 Cookie Secret
+
+Cookie 的读取优先级为：
+
+1. `DOUYIN_COOKIE_FILE`
+2. `DOUYIN_COOKIE`
+3. YAML 中的 `cookie.value`
+
+推荐复制 `secrets/douyin_cookie.example.txt` 为宿主机私有文件，并设置：
+
+```bash
+DOUYIN_COOKIE_FILE_PATH=/绝对路径/douyin_cookie.txt docker compose up -d
+```
+
+不要把真实 Cookie 写入 YAML、镜像或 Git。日志只输出脱敏状态。
+
+### 3. 启动、检查与停止
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f --tail=200
+docker compose exec app python -m app.health check
+docker compose stop
+```
+
+录制文件保存在宿主机 `downloads/`，健康状态保存在 Docker 命名卷
+`douyin_state`。Linux/NAS 上应确保 `downloads/` 可由 UID 10001 写入。
+代理通过 `proxy.url` 设置。健康检查关注
+调度心跳、最近检测、目录可写性、剩余磁盘和 FFmpeg 连续崩溃，不会把
+单个主播未开播判为故障。
+解析错误会按 Cookie 失效、风控、网络和其他解析错误分类，脱敏、限量保存到
+状态卷的 `error_observations.json`，便于长期观察且不会写入 Cookie 或完整 URL。
+
+收到 SIGTERM/SIGINT 后，daemon 会停止新检查和新录制，向全部 FFmpeg
+发送 SIGINT 并等待文件尾写入；超时后才依次 terminate 和 kill。
+Compose 为此保留 90 秒停止宽限期。
+
+发布镜像正式支持 `linux/amd64` 和 `linux/arm64`。`linux/arm/v7` 已通过
+buildx/QEMU 下的完整镜像构建及 FFmpeg、Node、Python/ExecJS 运行验证，
+但暂作为 CI 中允许失败的实验目标，不进入正式多架构标签。主分支发布 `edge`；
+正式 `v*` Release 才发布版本标签和 `latest`。升级前应备份配置与下载
+目录，拉取固定版本标签，重新创建容器并检查健康状态。

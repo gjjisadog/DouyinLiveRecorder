@@ -19,7 +19,7 @@ async def async_req(
         include_cookies: bool = False,
         abroad: bool = False,
         content_conding: str = 'utf-8',
-        verify: bool = False,
+        verify: bool = True,
         http2: bool = True
 ) -> OptionalDict | OptionalStr | tuple:
     if headers is None:
@@ -47,7 +47,7 @@ async def async_req(
 
 
 async def get_response_status(url: str, proxy_addr: OptionalStr = None, headers: OptionalDict = None,
-                              timeout: int = 10, abroad: bool = False, verify: bool = False, http2=False) -> bool:
+                              timeout: int = 10, abroad: bool = False, verify: bool = True, http2=False) -> bool:
 
     try:
         proxy_addr = utils.handle_proxy_addr(proxy_addr)

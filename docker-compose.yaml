@@ -1,16 +1,51 @@
-version: '3.8'
-
 services:
   app:
-    image: ihmily/douyin-live-recorder:latest
+    image: ${DLR_IMAGE_REPOSITORY:-douyin-live-recorder}:${DLR_IMAGE_TAG:-4.0.7}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${DLR_IMAGE_TAG:-4.0.7}
+        REVISION: ${GIT_REVISION:-local}
+        CREATED: ${BUILD_CREATED:-local}
+    container_name: douyin-recorder
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
     environment:
-      - TERM=xterm-256color
-    tty: true
-    stdin_open: true
-    #build: .
+      TZ: ${TZ:-Asia/Shanghai}
+      DOUYIN_CONFIG: /app/config/douyin.yaml
+      DOUYIN_COOKIE_FILE: /run/secrets/douyin_cookie
+      DLR_DISABLE_FILE_LOGS: "1"
+      TINI_SUBREAPER: "1"
     volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
-      - ./backup_config:/app/backup_config
-      - ./downloads:/app/downloads
-    restart: always
+      - ./config:/app/config:ro
+      - ./downloads:/data/downloads
+      - douyin_state:/data/state
+    secrets:
+      - douyin_cookie
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.health", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  douyin_cookie:
+    file: ${DOUYIN_COOKIE_FILE_PATH:-./secrets/douyin_cookie.example.txt}
+
+volumes:
+  douyin_state:
