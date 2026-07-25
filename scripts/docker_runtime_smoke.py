@@ -57,7 +57,8 @@ def inspect_json(image: str, template: str) -> object:
 def write_config(root: Path) -> None:
     config = root / "config"
     config.mkdir(parents=True)
-    (config / "douyin.yaml").write_text(
+    config_file = config / "douyin.yaml"
+    config_file.write_text(
         """rooms:
   - url: https://live.douyin.com/123456
     name: smoke
@@ -85,6 +86,9 @@ notifications:
 """,
         encoding="utf-8",
     )
+    if os.name != "nt":
+        config.chmod(0o777)
+        config_file.chmod(0o666)
     for name in ("downloads", "state", "logs", "backup_config"):
         path = root / name
         path.mkdir()
@@ -275,6 +279,26 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     )
     with opener.open(add_request, timeout=5) as response:
         response.read()
+    persisted_config = run(
+        [
+            "docker",
+            "exec",
+            name,
+            "python",
+            "-c",
+            (
+                "import pathlib,yaml;"
+                "d=yaml.safe_load(pathlib.Path('/app/config/douyin.yaml').read_bytes()) or {};"
+                "raise SystemExit(0 if len(d.get('rooms',[])) == 2 else 1)"
+            ),
+        ],
+        check=False,
+    )
+    if persisted_config.returncode != 0:
+        raise RuntimeError(
+            "NAS Web did not persist the added room\n\n"
+            f"{container_diagnostics(name, root)}"
+        )
     try:
         wait_until(
             "daemon YAML hot reload",
