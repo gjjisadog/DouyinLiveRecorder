@@ -2,6 +2,21 @@
 
 最后更新：2026-07-25
 
+## 2026-07-25 NAS Web 与 daemon 统一
+
+- NAS Launcher 固定启动 `python -m app.douyin_daemon`，已移除 NAS 运行时的
+  `DLR_RECORDER_MODE=legacy` 和旧 `main.py` 分支；旧多平台源码入口仍保留。
+- NAS Web 与 daemon 只使用 `config/douyin.yaml`。Web 支持房间增删改、启停、
+  画质设置和基础录制参数只读展示，不再读写 `URL_config.ini`。
+- YAML 写入采用同目录临时文件、完整校验和 `os.replace`。Web 不展示 Cookie；
+  检测到明文 `cookie.value` 时拒绝改写，要求迁移到 Cookie Secret。
+- daemon 监视配置原子替换并切换不可变配置快照。新增房间会唤醒调度，删除或
+  停用房间会通过唯一 `ProcessManager` 优雅停止对应 FFmpeg；非法配置保留旧快照。
+- Web 状态页和容器 Healthcheck 直接读取 `/data/state/health.json`，展示服务健康、
+  房间数、录制数、最近检测、磁盘、错误分类和 FFmpeg 返回状态，不扫描进程名。
+- 公网监听必须提供 `/run/secrets/web_token`；管理页面和写请求要求认证，写请求
+  同时使用 SameSite CSRF Cookie、隐藏 Token 和 64 KiB 请求体上限。
+
 ## 2026-07-25 Docker 合并回归第一阶段
 
 - Dockerfile 已拆分为两个显式 target：
@@ -11,9 +26,8 @@
     检查 Launcher、Web 和子 daemon，开放 18091。
 - 三份 Compose 均显式选择对应 target，录制目录统一为 `/data/downloads`，
   状态目录统一为 `/data/state`，停止宽限期为 90 秒。
-- NAS Launcher 默认拉起新 daemon；旧 `main.py` 通过
-  `DLR_RECORDER_MODE=legacy` 保留，不删除旧多平台能力；旧入口也已接入
-  SIGTERM 和 FFmpeg 进程组分级停止。
+- 第一阶段曾保留 NAS legacy 开关；第二阶段已从 NAS Launcher 删除该开关。
+  旧多平台入口源码仍保持可运行，并继续保留 SIGTERM 与进程组停止修复。
 - Launcher 与 FFmpeg 在 Linux 使用独立进程组，停止顺序为 SIGINT、等待、
   terminate、等待、kill。
 - CI 已改为运行全量 `python -m pytest -v`、三份 Compose、两个 target 构建、
@@ -24,7 +38,7 @@
   取代（superseded）；建议关闭，不再合并到 `legacy-4.0.7-base`。
 - 本阶段没有执行 24/72 小时测试，也没有修改 Windows GUI 或抖音解析算法。
 
-## 2026-04-05 Docker 配置页
+## 2026-04-05 Docker 配置页（历史，已由 2026-07-25 第二阶段取代）
 - Docker / NAS 部署现在会同时启动一个轻量配置网页，用于直接管理 `config/URL_config.ini`。
 - 容器入口从 `python main.py` 调整为 `python -m client.infra.docker.launcher`：
   - 后台继续拉起 `python main.py`

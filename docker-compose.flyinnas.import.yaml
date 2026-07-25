@@ -6,12 +6,12 @@ services:
       TZ: Asia/Shanghai
       TERM: xterm-256color
       DLR_HEADLESS: "1"
-      DLR_RECORDER_MODE: daemon
       DLR_WEB_HOST: 0.0.0.0
       DLR_WEB_PORT: "18091"
+      DLR_WEB_TOKEN_FILE: /run/secrets/web_token
+      DLR_STATE_PATH: /data/state
       DOUYIN_CONFIG: /app/config/douyin.yaml
       DOUYIN_COOKIE_FILE: /run/secrets/douyin_cookie
-      DLR_HEALTHCHECK_TARGET: app.douyin_daemon
       DLR_HEALTHCHECK_WEB_URL: http://127.0.0.1:18091/health
     volumes:
       - /vol1/docker/douyin-live-recorder/config:/app/config
@@ -19,6 +19,8 @@ services:
       - /vol1/docker/douyin-live-recorder/backup_config:/app/backup_config
       - /vol1/docker/douyin-live-recorder/downloads:/data/downloads
       - /vol1/docker/douyin-live-recorder/state:/data/state
+      - /vol1/docker/douyin-live-recorder/secrets/web_token:/run/secrets/web_token:ro
+      - /vol1/docker/douyin-live-recorder/secrets/douyin_cookie:/run/secrets/douyin_cookie:ro
     ports:
       - "18091:18091"
     healthcheck:

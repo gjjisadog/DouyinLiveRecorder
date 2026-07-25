@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -53,7 +56,6 @@ def inspect_json(image: str, template: str) -> object:
 def write_config(root: Path) -> None:
     config = root / "config"
     config.mkdir(parents=True)
-    (config / "URL_config.ini").write_text("", encoding="utf-8")
     (config / "douyin.yaml").write_text(
         """rooms:
   - url: https://live.douyin.com/123456
@@ -87,6 +89,12 @@ notifications:
         path.mkdir()
         if os.name != "nt":
             path.chmod(0o777)
+    secrets = root / "secrets"
+    secrets.mkdir()
+    (secrets / "web_token").write_text("docker-smoke-web-token-1234567890\n", encoding="utf-8")
+    if os.name != "nt":
+        secrets.chmod(0o777)
+        (secrets / "web_token").chmod(0o644)
 
 
 def remove_container(name: str) -> None:
@@ -131,6 +139,7 @@ def smoke_daemon(image: str, root: Path, name: str) -> None:
 
 
 def smoke_nas_web(image: str, root: Path, name: str) -> None:
+    token = (root / "secrets" / "web_token").read_text(encoding="utf-8").strip()
     run(
         [
             "docker",
@@ -150,17 +159,90 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
             docker_mount(root / "logs", "/app/logs"),
             "--mount",
             docker_mount(root / "backup_config", "/app/backup_config"),
+            "--mount",
+            docker_mount(root / "secrets" / "web_token", "/run/secrets/web_token", readonly=True),
             image,
         ]
     )
 
+    base_url = ""
+
     def web_is_ready() -> bool:
+        nonlocal base_url
         binding = run(["docker", "port", name, "18091/tcp"]).stdout.strip().splitlines()[0]
         port = binding.rsplit(":", 1)[1]
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
-            return response.status == 200 and "Docker" in response.read().decode("utf-8")
+        base_url = f"http://127.0.0.1:{port}"
+        request = urllib.request.Request(
+            f"{base_url}/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return response.status == 200 and "daemon NAS" in response.read().decode("utf-8")
 
     wait_until("NAS Web endpoint", web_is_ready)
+    unauthenticated = run(
+        [
+            "docker",
+            "exec",
+            name,
+            "python",
+            "-c",
+            (
+                "import urllib.request,urllib.error;"
+                "\ntry: urllib.request.urlopen('http://127.0.0.1:18091/',timeout=3)"
+                "\nexcept urllib.error.HTTPError as exc: raise SystemExit(0 if exc.code == 401 else 2)"
+                "\nraise SystemExit(3)"
+            ),
+        ],
+        check=False,
+    )
+    if unauthenticated.returncode != 0:
+        raise RuntimeError("NAS management page did not require authentication")
+
+    before_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    page_request = urllib.request.Request(
+        f"{base_url}/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with opener.open(page_request, timeout=5) as response:
+        page = response.read().decode("utf-8")
+    csrf = re.search(r'name="csrf_token" value="([^"]+)"', page)
+    if not csrf:
+        raise RuntimeError("NAS Web page did not issue a CSRF token")
+    payload = urllib.parse.urlencode(
+        {
+            "csrf_token": csrf.group(1),
+            "url": "https://live.douyin.com/654321",
+            "name": "hot-reload-smoke",
+            "quality": "sd",
+            "enabled": "1",
+        }
+    ).encode("utf-8")
+    add_request = urllib.request.Request(
+        f"{base_url}/rooms/add",
+        data=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with opener.open(add_request, timeout=5) as response:
+        response.read()
+    wait_until(
+        "daemon YAML hot reload",
+        lambda: (
+            json.loads((root / "state" / "health.json").read_text(encoding="utf-8")).get(
+                "configured_rooms"
+            )
+            == 2
+        ),
+    )
+    after_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
+    if after_state.get("started_at") != before_state.get("started_at"):
+        raise RuntimeError("daemon restarted instead of hot-loading YAML")
+    if not after_state.get("config_reloaded_at"):
+        raise RuntimeError("daemon did not report a successful YAML hot reload")
+    process_list = run(["docker", "top", name, "-eo", "pid,comm,args"]).stdout.lower()
+    if "main.py" in process_list or "app.douyin_daemon" not in process_list:
+        raise RuntimeError(f"NAS launcher used an unexpected recorder entrypoint: {process_list}")
     wait_until(
         "NAS healthcheck",
         lambda: run(
@@ -174,6 +256,9 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     logs = log_result.stdout + log_result.stderr
     if "recorder stop stage=SIGINT" not in logs or "daemon_stopped" not in logs:
         raise RuntimeError("NAS launcher did not gracefully stop its daemon child")
+    stopped_processes = run(["docker", "top", name, "-eo", "pid,comm,args"], check=False)
+    if stopped_processes.returncode == 0 and "ffmpeg" in stopped_processes.stdout.lower():
+        raise RuntimeError("FFmpeg remained after stopping the NAS container")
 
 
 def smoke_ffmpeg_stop(image: str, root: Path, name: str) -> None:
@@ -259,11 +344,14 @@ def main() -> int:
         try:
             smoke_daemon(args.daemon_image, root, names["daemon"])
             smoke_nas_web(args.nas_image, root, names["nas"])
-            smoke_ffmpeg_stop(args.daemon_image, root, names["ffmpeg"])
+            smoke_ffmpeg_stop(args.nas_image, root, names["ffmpeg"])
         finally:
             for name in names.values():
                 remove_container(name)
-    print("Docker runtime smoke passed: entries, healthchecks, Web, SIGINT stop and ffprobe.")
+    print(
+        "Docker runtime smoke passed: authenticated YAML hot reload, shared HealthState, "
+        "SIGINT stop, no residual FFmpeg and ffprobe."
+    )
     return 0
 
 

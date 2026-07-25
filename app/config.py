@@ -131,7 +131,12 @@ def _ensure_writable_directory(path: Path, field: str) -> None:
         raise ConfigError(f"{field} 不可写: {path}: {exc}") from exc
 
 
-def load_config(path: str | Path, *, validate_storage: bool = True) -> AppConfig:
+def load_config(
+    path: str | Path,
+    *,
+    validate_storage: bool = True,
+    require_enabled_rooms: bool = True,
+) -> AppConfig:
     config_path = Path(path)
     if not config_path.is_file():
         raise ConfigError(f"配置文件不存在: {config_path}")
@@ -162,7 +167,7 @@ def load_config(path: str | Path, *, validate_storage: bool = True) -> AppConfig
         if enabled and identity not in seen:
             seen.add(identity)
             rooms.append(RoomConfig(canonical_url, name.strip(), quality_value.lower(), True))
-    if not rooms:
+    if require_enabled_rooms and not rooms:
         raise ConfigError("rooms 中没有启用的抖音直播间")
 
     recorder = _mapping(root.get("recorder"), "recorder")

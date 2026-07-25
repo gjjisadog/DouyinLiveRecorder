@@ -15,7 +15,7 @@ ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web
 
 ## 导入前准备
 
-创建以下目录，并准备 `config/douyin.yaml`：
+创建以下目录，并准备 `config/douyin.yaml`、Web Token 和可选 Cookie Secret：
 
 ```text
 /vol1/docker/douyin-live-recorder/config/
@@ -23,6 +23,9 @@ ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web
 /vol1/docker/douyin-live-recorder/backup_config/
 /vol1/docker/douyin-live-recorder/downloads/
 /vol1/docker/douyin-live-recorder/state/
+/vol1/docker/douyin-live-recorder/secrets/
+/vol1/docker/douyin-live-recorder/secrets/web_token
+/vol1/docker/douyin-live-recorder/secrets/douyin_cookie
 ```
 
 如果存储卷不是 `/vol1`，请统一调整挂载源路径。
@@ -45,6 +48,9 @@ http://NAS_IP:18091
 http://NAS_IP:18091/logs
 ```
 
+浏览器认证时用户名可任意填写，密码为 `secrets/web_token` 的内容。所有管理页面
+和写操作都要求认证，写操作同时要求页面签发的 CSRF Token。
+
 ## 停止检查
 
 停止容器后确认：
@@ -53,6 +59,6 @@ http://NAS_IP:18091/logs
 2. 子 daemon 输出 `daemon_stopped`。
 3. 宿主机没有该容器遗留的 FFmpeg 进程。
 
-Web 页仍保留旧 `URL_config.ini` 编辑能力；默认录制子进程已切换到
-`app.douyin_daemon`，其实际录制配置来自 `config/douyin.yaml`。如需旧多平台入口，
-显式设置 `DLR_RECORDER_MODE=legacy`。
+Web 与录制子进程只使用 `config/douyin.yaml`。Launcher 固定启动
+`python -m app.douyin_daemon`，NAS 模式不再提供 `main.py` 或 `URL_config.ini`
+兼容开关；旧多平台源码入口仍保留在仓库中供非 NAS 场景使用。

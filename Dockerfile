@@ -67,11 +67,11 @@ CMD ["python", "-m", "app.douyin_daemon"]
 FROM runtime AS nas-web
 
 ENV DOUYIN_CONFIG=/app/config/douyin.yaml \
-    DLR_RECORDER_MODE=daemon \
-    DLR_WEB_CONFIG_PATH=/app/config/URL_config.ini \
     DLR_WEB_LOG_DIR=/app/logs \
+    DLR_STATE_PATH=/data/state \
     DLR_WEB_HOST=0.0.0.0 \
     DLR_WEB_PORT=18091 \
+    DLR_WEB_TOKEN_FILE=/run/secrets/web_token \
     DLR_HEALTHCHECK_WEB_URL=http://127.0.0.1:18091/health
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

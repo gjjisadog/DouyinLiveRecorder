@@ -9,14 +9,12 @@ import time
 from pathlib import Path
 
 from client.infra.docker.config_web import create_server
-from client.infra.docker.healthcheck import read_url_entries
 
 DEFAULT_APP_ROOT = Path("/app")
 DEFAULT_RESTART_DELAY_SECONDS = 5
 DEFAULT_INTERRUPT_TIMEOUT_SECONDS = 30
 DEFAULT_TERMINATE_TIMEOUT_SECONDS = 30
 DEFAULT_KILL_TIMEOUT_SECONDS = 10
-RECORDER_MODES = {"daemon", "legacy"}
 KILL_SIGNAL = getattr(signal, "SIGKILL", getattr(signal, "SIGBREAK", signal.SIGTERM))
 
 
@@ -31,12 +29,13 @@ class DockerLauncher:
         self._stopped = False
         self._waiting_for_config_logged = False
         self.restart_delay_seconds = int(os.environ.get("DLR_RECORDER_RESTART_DELAY", str(DEFAULT_RESTART_DELAY_SECONDS)))
-        self.config_path = Path(os.environ.get("DLR_WEB_CONFIG_PATH", str(self.app_root / "config" / "URL_config.ini")))
-        self.recorder_mode = os.environ.get("DLR_RECORDER_MODE", "daemon").strip().lower()
-        if self.recorder_mode not in RECORDER_MODES:
-            raise ValueError(f"Unsupported DLR_RECORDER_MODE: {self.recorder_mode}")
         self.daemon_config_path = Path(
             os.environ.get("DOUYIN_CONFIG", str(self.app_root / "config" / "douyin.yaml"))
+        )
+        self.log_dir = Path(os.environ.get("DLR_WEB_LOG_DIR", str(self.app_root / "logs")))
+        self.state_path = Path(os.environ.get("DLR_STATE_PATH", "/data/state"))
+        self.token_file = Path(
+            os.environ.get("DLR_WEB_TOKEN_FILE", "/run/secrets/web_token")
         )
         self.interrupt_timeout = float(
             os.environ.get("DLR_STOP_INTERRUPT_TIMEOUT", str(DEFAULT_INTERRUPT_TIMEOUT_SECONDS))
@@ -51,19 +50,25 @@ class DockerLauncher:
     def start(self) -> None:
         host = os.environ.get("DLR_WEB_HOST", "0.0.0.0").strip() or "0.0.0.0"
         port = int(os.environ.get("DLR_WEB_PORT", "18091"))
-        self.server = create_server(config_path=self.config_path, host=host, port=port)
-        self.server_thread = threading.Thread(target=self.server.serve_forever, name="docker-config-web", daemon=True)
+        self.server = create_server(
+            config_path=self.daemon_config_path,
+            log_dir=self.log_dir,
+            state_path=self.state_path,
+            host=host,
+            port=port,
+            token_file=self.token_file,
+        )
+        self.server_thread = threading.Thread(
+            target=self.server.serve_forever,
+            name="docker-config-web",
+        )
         self.server_thread.start()
-        print(f"[docker-config-web] serving http://{host}:{port} for {self.config_path}")
+        print(f"[docker-config-web] serving host={host} port={port} config={self.daemon_config_path}")
 
     def _recorder_command(self) -> list[str]:
-        if self.recorder_mode == "legacy":
-            return [sys.executable, "main.py"]
         return [sys.executable, "-m", "app.douyin_daemon"]
 
     def _recorder_is_configured(self) -> bool:
-        if self.recorder_mode == "legacy":
-            return bool(read_url_entries(self.config_path))
         return self.daemon_config_path.is_file()
 
     def _start_recorder(self) -> None:
@@ -76,7 +81,7 @@ class DockerLauncher:
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
-        print(f"[docker-launcher] starting recorder mode={self.recorder_mode}")
+        print("[docker-launcher] starting recorder module=app.douyin_daemon")
         self.child = subprocess.Popen(command, **popen_kwargs)
         self._waiting_for_config_logged = False
 
@@ -98,8 +103,9 @@ class DockerLauncher:
                 self._start_recorder()
                 continue
             if not self._waiting_for_config_logged:
-                expected_path = self.config_path if self.recorder_mode == "legacy" else self.daemon_config_path
-                print(f"[docker-launcher] waiting for recorder configuration in {expected_path}")
+                print(
+                    f"[docker-launcher] waiting for recorder configuration in {self.daemon_config_path}"
+                )
                 self._waiting_for_config_logged = True
             self._stop_event.wait(1)
         return 0
@@ -155,10 +161,15 @@ class DockerLauncher:
             self._stopped = True
             self._stop_event.set()
             if self.server is not None:
+                self.server.stop_accepting_writes()
                 self.server.shutdown()
+            self._stop_child()
+            if self.server is not None:
                 self.server.server_close()
                 self.server = None
-            self._stop_child()
+            if self.server_thread is not None:
+                self.server_thread.join(timeout=30)
+                self.server_thread = None
 
 
 def main() -> int:

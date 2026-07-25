@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.config import load_config
+from app.config_store import YamlConfigStore
 from app.douyin_daemon import (
     DouyinDaemon,
     classify_recording_end,
@@ -87,5 +90,96 @@ storage:
         _, result = daemon._resolve(daemon.config.rooms[0])
     assert result["is_live"] is True
     assert result["room_id"] == "999"
+    daemon.pool.shutdown(wait=True)
+    daemon.postprocess.shutdown(wait=True)
+
+
+def test_daemon_hot_reload_atomically_switches_snapshot(tmp_path: Path) -> None:
+    config_file = tmp_path / "douyin.yaml"
+    config_file.write_text(
+        f"""rooms:
+  - url: https://live.douyin.com/123
+    quality: original
+    enabled: true
+recorder:
+  poll_seconds: 10
+storage:
+  path: {tmp_path.as_posix()}/downloads
+  state_path: {tmp_path.as_posix()}/state
+  min_free_gb: 0.1
+""",
+        encoding="utf-8",
+    )
+    daemon = DouyinDaemon(
+        load_config(config_file, require_enabled_rooms=False),
+        config_path=config_file,
+    )
+    store = YamlConfigStore(config_file)
+    store.update(
+        0,
+        url="https://live.douyin.com/123",
+        quality="hd",
+        name="changed",
+        enabled=True,
+    )
+
+    assert daemon.reload_config()
+    assert daemon.config.rooms[0].quality == "hd"
+    assert daemon.config.rooms[0].name == "changed"
+    assert daemon.health.snapshot()["config_reload_error"] == ""
+    daemon.pool.shutdown(wait=True)
+    daemon.postprocess.shutdown(wait=True)
+
+
+def test_invalid_hot_reload_keeps_previous_snapshot(tmp_path: Path) -> None:
+    config_file = tmp_path / "douyin.yaml"
+    config_file.write_text(
+        f"""rooms:
+  - url: https://live.douyin.com/123
+storage:
+  path: {tmp_path.as_posix()}/downloads
+  state_path: {tmp_path.as_posix()}/state
+  min_free_gb: 0.1
+""",
+        encoding="utf-8",
+    )
+    daemon = DouyinDaemon(
+        load_config(config_file),
+        config_path=config_file,
+    )
+    previous = daemon.config
+    config_file.write_text("rooms: [invalid\n", encoding="utf-8")
+
+    assert not daemon.reload_config()
+    assert daemon.config is previous
+    assert daemon.health.snapshot()["last_error_category"] == "configuration_invalid"
+    daemon.pool.shutdown(wait=True)
+    daemon.postprocess.shutdown(wait=True)
+
+
+def test_disabling_room_stops_its_active_recording(tmp_path: Path) -> None:
+    config_file = tmp_path / "douyin.yaml"
+    config_file.write_text(
+        f"""rooms:
+  - url: https://live.douyin.com/123
+storage:
+  path: {tmp_path.as_posix()}/downloads
+  state_path: {tmp_path.as_posix()}/state
+  min_free_gb: 0.1
+""",
+        encoding="utf-8",
+    )
+    daemon = DouyinDaemon(load_config(config_file), config_path=config_file)
+    daemon.recording_room_urls["recording-key"] = "https://live.douyin.com/123"
+    stopped = threading.Event()
+    store = YamlConfigStore(config_file)
+    store.toggle(0)
+
+    with patch.object(daemon.processes, "stop", side_effect=lambda keys: stopped.set()) as stop:
+        assert daemon.reload_config()
+        assert stopped.wait(2)
+
+    stop.assert_called_once_with(["recording-key"])
+    assert daemon.config.rooms == ()
     daemon.pool.shutdown(wait=True)
     daemon.postprocess.shutdown(wait=True)

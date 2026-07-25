@@ -78,6 +78,16 @@ def test_empty_room_list_fails_instead_of_waiting_for_input(tmp_path: Path) -> N
         load_config(config_path, validate_storage=False)
 
 
+def test_daemon_can_load_empty_room_snapshot_for_web_hot_add(tmp_path: Path) -> None:
+    config_path = write_config(tmp_path / "empty.yaml", "rooms: []\n")
+    config = load_config(
+        config_path,
+        validate_storage=False,
+        require_enabled_rooms=False,
+    )
+    assert config.rooms == ()
+
+
 def test_cookie_priority_and_redaction(tmp_path: Path) -> None:
     secret = tmp_path / "cookie"
     secret.write_text("ttwid=file-secret", encoding="utf-8")

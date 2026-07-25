@@ -362,7 +362,8 @@ python main.py
 Dockerfile 提供两个明确构建目标，不再共享模糊的默认入口：
 
 - `daemon`：仅运行 `python -m app.douyin_daemon`，不开放 Web 端口。
-- `nas-web`：运行 `python -m client.infra.docker.launcher`，开放 18091 管理端口，并默认拉起新 daemon。
+- `nas-web`：运行 `python -m client.infra.docker.launcher`，开放 18091 管理端口，
+  并只拉起同一个 `python -m app.douyin_daemon`；不再调用旧 `main.py`。
 
 1.启动 daemon
 
@@ -374,8 +375,14 @@ docker compose -f docker-compose.yaml up -d --build
 
 2.启动飞牛 NAS Web
 
-`docker-compose.flyinnas.yaml` 显式构建 `nas-web` target。浏览器访问
-`http://NAS_IP:18091`；端口可通过 `.env` 中的 `DLR_WEB_PORT` 修改。
+`docker-compose.flyinnas.yaml` 显式构建 `nas-web` target。首次启动前创建
+`client_data/secrets/web_token`（至少 16 个随机字符）和可选的
+`client_data/secrets/douyin_cookie`。浏览器访问 `http://NAS_IP:18091`，使用任意
+用户名和 Web Token 作为密码；端口可通过 `.env` 中的 `DLR_WEB_PORT` 修改。
+
+NAS Web 与 daemon 共用 `config/douyin.yaml` 和 `/data/state/health.json`。
+通过页面新增、修改、启停或删除房间后，daemon 会原子热加载，不需要重启容器。
+页面不会显示或写入 Cookie；Cookie 只从 Secret 文件读取。
 
 ```bash
 docker compose -f docker-compose.flyinnas.yaml up -d --build

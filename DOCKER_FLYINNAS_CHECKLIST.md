@@ -12,8 +12,11 @@
   - `logs/`
   - `backup_config/`
   - `downloads/`
-- 已在 `config/URL_config.ini` 中写入至少一个直播间地址。
-- 已按需调整 `config/config.ini`。
+  - `client_data/docker-state/`
+  - `client_data/secrets/`
+- `config/douyin.yaml` 存在且可校验；允许先使用空 `rooms: []`，再从 Web 添加。
+- `client_data/secrets/web_token` 至少包含 16 个随机字符。
+- Cookie 如有需要，仅写入 `client_data/secrets/douyin_cookie`。
 
 ## 一键部署
 
@@ -33,8 +36,10 @@ python -m client.infra.docker.flyinnas_regression first-deploy --app-root .
 ## 部署后检查
 
 - 执行 `docker compose -f docker-compose.flyinnas.yaml ps`，确认容器状态为 `Up`。
-- 执行 `docker compose -f docker-compose.flyinnas.yaml logs -f`，确认没有出现 `URL_config.ini 为空` 报错。
+- 执行 `docker compose -f docker-compose.flyinnas.yaml logs -f`，确认没有 YAML
+  校验、Secret 读取或模块导入错误。
 - 执行 `docker inspect --format='{{json .State.Health}}' douyin-live-recorder`，确认健康检查状态为 `healthy`。
+- 使用 Web Token 登录 `http://NAS_IP:18091`，添加一个房间并确认无需重启即可热加载。
 - 确认 `downloads/` 目录能正常写入录制文件。
 - 确认 `logs/` 目录持续输出运行日志。
 

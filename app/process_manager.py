@@ -161,6 +161,27 @@ class ProcessManager:
     def stop_all(self, interrupt_timeout: float = 30.0, terminate_timeout: float = 15.0) -> None:
         with self._lock:
             processes = list(self._processes.values())
+        self._stop_managed(processes, interrupt_timeout, terminate_timeout)
+
+    def stop(
+        self,
+        keys: Iterable[str],
+        interrupt_timeout: float = 30.0,
+        terminate_timeout: float = 15.0,
+    ) -> None:
+        requested = set(keys)
+        with self._lock:
+            processes = [
+                managed for key, managed in self._processes.items() if key in requested
+            ]
+        self._stop_managed(processes, interrupt_timeout, terminate_timeout)
+
+    def _stop_managed(
+        self,
+        processes: list[ManagedProcess],
+        interrupt_timeout: float,
+        terminate_timeout: float,
+    ) -> None:
         for managed in processes:
             try:
                 self._send_interrupt(managed.process)

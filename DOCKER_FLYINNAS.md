@@ -30,12 +30,13 @@ downloads/
 ## 首次准备
 
 1. 将仓库文件放到飞牛云的项目目录中。
-2. 编辑 `config/URL_config.ini`，一行一个直播间地址。
-3. 按需编辑 `config/config.ini`。
-4. 建议把录制格式设为 `ts`，这样容器异常退出时更不容易损坏文件。
-5. 如需按单核对，可对照 [DOCKER_FLYINNAS_CHECKLIST.md](./DOCKER_FLYINNAS_CHECKLIST.md) 完成部署前和部署后检查。
-6. 如需按“首次部署 / 升级部署 / 回滚部署”分别回归，可对照 [DOCKER_FLYINNAS_REGRESSION.md](./DOCKER_FLYINNAS_REGRESSION.md)。
-7. 如需在飞牛云主机上直接执行回归校验，可运行：
+2. 编辑 `config/douyin.yaml`，或先保留空 `rooms: []`，启动后通过 Web 添加。
+3. 创建 `client_data/secrets/web_token`，写入至少 16 个随机字符。
+4. Cookie 如有需要写入 `client_data/secrets/douyin_cookie`，不要写进 Web 或日志。
+5. 建议保持录制格式为 `ts`，这样容器异常退出时更不容易损坏文件。
+6. 如需按单核对，可对照 [DOCKER_FLYINNAS_CHECKLIST.md](./DOCKER_FLYINNAS_CHECKLIST.md) 完成部署前和部署后检查。
+7. 如需按“首次部署 / 升级部署 / 回滚部署”分别回归，可对照 [DOCKER_FLYINNAS_REGRESSION.md](./DOCKER_FLYINNAS_REGRESSION.md)。
+8. 如需在飞牛云主机上直接执行回归校验，可运行：
 ```bash
 python -m client.infra.docker.flyinnas_regression first-deploy --app-root .
 ```
@@ -53,9 +54,9 @@ docker compose -f docker-compose.flyinnas.yaml up -d --build
 - `/`：主播配置页，可增删或停用主播配置
 - `/logs`：日志控制台，可查看当前录制日志
 
-页面保存的内容会写入挂载目录下的 `config/URL_config.ini`；日志控制台读取
-`logs/`。默认 daemon 子进程实际使用 `config/douyin.yaml`，旧 URL 配置页主要
-用于显式 `DLR_RECORDER_MODE=legacy` 的多平台兼容模式。
+页面与 daemon 共用挂载目录下的 `config/douyin.yaml`；日志控制台读取 `logs/`。
+浏览器会提示 HTTP Basic 认证，用户名可任意填写，密码为 Web Token。房间配置
+使用临时文件校验后原子替换，daemon 自动热加载，不需要重启容器。
 
 如果你准备走“飞牛 Docker UI 导入 Compose + 固定镜像标签”的方式，仓库里额外提供了 [docker-compose.flyinnas.import.yaml](./docker-compose.flyinnas.import.yaml)：
 
@@ -118,7 +119,8 @@ Linux / macOS / Git Bash：
 
 - 脚本会自动打包当前仓库代码并上传到 NAS。
 - 会自动避开本地 `.client-conda-env`、`build/`、`dist/`、`logs/`、`downloads/`、`backup_config/`、`client_data/` 等大目录和运行目录。
-- 远端已有的 `config/config.ini` 与 `config/URL_config.ini` 默认不会被覆盖；仅在首次不存在时才从仓库模板补齐。
+- 远端已有的 `config/douyin.yaml` 默认不会被覆盖；首次部署会生成 Web Token，
+  并创建权限受限的 Cookie Secret 文件。
 - 上传完成后会执行 `docker compose -f docker-compose.flyinnas.yaml up -d --build`，并自动调用 `python -m client.infra.docker.flyinnas_regression ...` 做回归。
 
 ## 停止与查看
@@ -164,12 +166,12 @@ docker save ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web -o douyin-live-
 
 ## 关键行为
 
-- 容器内默认设置 `DLR_HEADLESS=1` 和 `DLR_RECORDER_MODE=daemon`。
-- `nas-web` 入口是 `python -m client.infra.docker.launcher`，Launcher 默认拉起
-  `python -m app.douyin_daemon`；旧 `main.py` 仅作为显式 legacy 兼容入口保留。
+- 容器内默认设置 `DLR_HEADLESS=1`。
+- `nas-web` 入口是 `python -m client.infra.docker.launcher`，Launcher 固定拉起
+  `python -m app.douyin_daemon`；NAS 不再调用旧 `main.py`。
 - Docker 网页入口现在同时提供主播配置页和只读日志控制台，更适合 NAS / FN Connect 场景。
 - `docker-compose.flyinnas.yaml` 使用 `restart: unless-stopped`，适合长期开机运行。
-- 健康检查同时确认 Launcher、Web `/health`、daemon 进程和 daemon 健康状态。
+- 健康检查直接读取 Web `/health` 与 daemon 的统一 `HealthState`，不扫描进程名。
 - 停止宽限期为 90 秒；Launcher 按 SIGINT、terminate、kill 顺序停止独立进程组。
 
 ## 常见问题
@@ -178,8 +180,8 @@ docker save ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web -o douyin-live-
 
 优先检查：
 
-- `config/URL_config.ini` 是否已经写入直播地址
-- `config/config.ini` 是否存在并可读
+- `config/douyin.yaml` 是否为合法 YAML
+- `client_data/secrets/web_token` 是否存在且至少 16 个字符
 - 挂载目录是否正确
 - `docker inspect --format='{{json .State.Health}}' douyin-live-recorder` 是否显示为 `unhealthy`
 

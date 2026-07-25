@@ -5,18 +5,16 @@
 ## Docker 合并回归后续
 
 1. 在功能分支 CI 上确认 GHCR 双 target 矩阵发布元数据和 Trivy SARIF 上传。
-2. 在真实飞牛 NAS 上复核 `nas-web` 的目录权限、90 秒停止宽限期和 legacy
-   多平台兼容模式；本阶段只完成本机 Docker Desktop 的真实容器验收。
+2. 在真实飞牛 NAS 上复核 `nas-web` 的配置目录权限、Web Secret 权限、热加载、
+   90 秒停止宽限期和浏览器认证体验；本阶段只完成本机 Docker Desktop 验收。
 3. Draft PR #1 已被 `main` 取代，建议维护者关闭并在关闭原因中引用当前主线。
-4. Web 页仍编辑旧 `URL_config.ini`，而默认 daemon 使用 `douyin.yaml`；在不新增
-   Web 功能的前提下，本阶段仅通过文档明确边界。后续若统一配置模型，应单独立项。
+4. 配置热加载目前支持房间和下一次录制使用的参数快照；运行时修改
+   `storage.state_path` 会被拒绝，需要重启后生效。
 
 ## Docker 配置页
-1. 如需继续增强 Docker 管理能力，优先在现有 `client.infra.docker.config_web` 上迭代。
-   - 当前已支持新增、停用、删除、批量编辑 `URL_config.ini`
-   - 当前已支持只读日志控制台 `/logs`
-   - 后续可考虑补充简单鉴权或把 `config/config.ini` 做页面化
-2. 如果新增 Docker / NAS 功能，优先保持 `main.py` 录制链路不变，通过旁路服务或启动器扩展，避免把 Web 管理逻辑直接耦合进录制主循环。
+1. 如需继续增强 Docker 管理能力，保持轻量标准库 HTTP 服务，不引入大型框架。
+   当前已支持鉴权、CSRF、YAML 房间管理、统一状态页和只读日志。
+2. 不要把 Cookie 或完整敏感 Header 加入 Web 表单、URL、状态文件或日志。
 3. 如需继续优化飞牛面板中的“快捷访问”显示，优先沿 `docker-compose.flyinnas.import.yaml` 保持：
    - 固定镜像标签
    - 固定宿主机端口

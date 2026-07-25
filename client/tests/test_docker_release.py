@@ -97,6 +97,9 @@ class DockerReleaseTests(unittest.TestCase):
                     self.assertIn("target: daemon", content)
                 else:
                     self.assertIn("DLR_WEB_PORT", content)
+                    self.assertIn("DLR_WEB_TOKEN_FILE", content)
+                    self.assertIn("douyin.yaml", content)
+                    self.assertNotIn("DLR_RECORDER_MODE", content)
                     self.assertIn("target: nas-web", content)
             else:
                 self.assertIn("DLR_WEB_PORT=18091", content)
@@ -109,6 +112,8 @@ class DockerReleaseTests(unittest.TestCase):
         self.assertIn('- "18091:18091"', content)
         self.assertNotIn("build:", content)
         self.assertIn("stop_grace_period: 90s", content)
+        self.assertIn("/run/secrets/web_token", content)
+        self.assertNotIn("DLR_RECORDER_MODE", content)
 
     def test_dockerfile_has_explicit_daemon_and_nas_web_contracts(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
@@ -119,6 +124,11 @@ class DockerReleaseTests(unittest.TestCase):
         self.assertIn("FROM runtime AS nas-web", content)
         self.assertIn('CMD ["python", "-m", "client.infra.docker.launcher"]', content)
         self.assertIn("https://github.com/gjjisadog/DouyinLiveRecorder", content)
+        launcher = (repo_root / "client" / "infra" / "docker" / "launcher.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('"main.py"', launcher)
+        self.assertNotIn("legacy", launcher.lower())
 
     def test_github_workflow_publishes_edge_and_release_tags(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]

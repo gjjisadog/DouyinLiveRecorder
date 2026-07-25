@@ -75,7 +75,7 @@ def create_deploy_bundle(repo_root: Path, bundle_path: Path) -> Path:
             if relative_path.parts[0] == "config":
                 continue
             archive.add(file_path, arcname=Path("app") / relative_path)
-        for config_name in ("config.ini", "URL_config.ini", "douyin.yaml"):
+        for config_name in ("douyin.yaml",):
             config_path = root / "config" / config_name
             if config_path.exists():
                 archive.add(config_path, arcname=Path("config_templates") / config_name)
@@ -136,23 +136,25 @@ upsert_env_key() {
 
 trap cleanup EXIT
 
-mkdir -p "$APP_ROOT" "$APP_ROOT/config" "$APP_ROOT/logs" "$APP_ROOT/backup_config" "$APP_ROOT/downloads" "$APP_ROOT/client_data/docker-state"
+mkdir -p "$APP_ROOT" "$APP_ROOT/config" "$APP_ROOT/logs" "$APP_ROOT/backup_config" "$APP_ROOT/downloads" "$APP_ROOT/client_data/docker-state" "$APP_ROOT/client_data/secrets"
 tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR"
 
 if [ -d "$TMP_DIR/app" ]; then
   cp -R "$TMP_DIR/app/." "$APP_ROOT/"
 fi
 
-if [ ! -f "$APP_ROOT/config/config.ini" ] && [ -f "$TMP_DIR/config_templates/config.ini" ]; then
-  cp "$TMP_DIR/config_templates/config.ini" "$APP_ROOT/config/config.ini"
-fi
-
-if [ ! -f "$APP_ROOT/config/URL_config.ini" ] && [ -f "$TMP_DIR/config_templates/URL_config.ini" ]; then
-  cp "$TMP_DIR/config_templates/URL_config.ini" "$APP_ROOT/config/URL_config.ini"
-fi
-
 if [ ! -f "$APP_ROOT/config/douyin.yaml" ] && [ -f "$TMP_DIR/config_templates/douyin.yaml" ]; then
   cp "$TMP_DIR/config_templates/douyin.yaml" "$APP_ROOT/config/douyin.yaml"
+fi
+
+if [ ! -s "$APP_ROOT/client_data/secrets/web_token" ]; then
+  umask 077
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$APP_ROOT/client_data/secrets/web_token"
+fi
+
+if [ ! -f "$APP_ROOT/client_data/secrets/douyin_cookie" ]; then
+  umask 077
+  : > "$APP_ROOT/client_data/secrets/douyin_cookie"
 fi
 
 if [ -n "$IMAGE_REPOSITORY" ] || [ -n "$EXPECTED_TAG" ]; then

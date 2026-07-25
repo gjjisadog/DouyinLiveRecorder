@@ -4,9 +4,8 @@
 
 ## Docker 合并回归后的已知边界
 
-- `nas-web` 默认子进程是新 daemon，实际录制配置为 `config/douyin.yaml`；
-  现有 Web 配置页仍写 `config/URL_config.ini`，该页面配置只由显式 legacy 模式
-  的旧多平台入口消费。两者不能视为同一配置源。
+- `nas-web` 与 daemon 已统一使用 `config/douyin.yaml` 和同一 HealthState；
+  NAS 不再支持旧 `main.py` 或 `URL_config.ini` 运行模式。
 - 本阶段在本机 Docker Desktop 完成真实双镜像、Healthcheck、Web、停止和
   `ffprobe` 验收，但未在真实飞牛 NAS 上复验目录权限或停止行为。
 - GHCR Actions 发布配置已静态检查并由测试覆盖；在分支未推送前，尚无本次
@@ -14,9 +13,11 @@
 - 没有执行 24/72 小时长期测试，不应从短时容器烟雾推断长期稳定性。
 
 ## Docker 配置页
-- 当前配置页默认无鉴权，适合局域网或受控 NAS 环境；如果需要公网暴露，应自行通过反向代理、白名单或额外认证保护。
-- 配置页只管理 `config/URL_config.ini`，不会覆盖 `config/config.ini` 中的 Cookie、推送和账号密码配置。
-- 配置页的增删停用会直接改写挂载文件；如果宿主机同时手工编辑同一文件，最后一次写入会生效。
+- 公网监听现在强制要求 Web Token，写请求有 CSRF 防护；但仍建议仅在可信局域网
+  暴露端口，公网部署应额外使用 TLS 反向代理和访问控制。
+- 配置页不会管理 Cookie。若旧 YAML 中仍有非空 `cookie.value`，Web 会拒绝修改，
+  需先迁移到 `/run/secrets/douyin_cookie`。
+- Web 使用原子替换避免半写文件；如果宿主机与 Web 同时保存，最后一次完整替换生效。
 - 日志控制台当前只支持查看固定日志文件 `streamget.log` 与 `PlayURL.log`，还不支持搜索、下载或自动刷新。
 - 飞牛面板“链接图标”目前没有查到明确公开的专用 Compose label 规范；当前采用的是更保守的兼容策略：
   - 稳定运行的容器

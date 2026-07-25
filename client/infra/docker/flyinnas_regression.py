@@ -11,11 +11,11 @@ import sys
 
 import yaml
 
+from app.config import ConfigError, load_config
+
 DEFAULT_CONTAINER_NAME = "douyin-live-recorder"
 DEFAULT_SCENARIOS = ("first-deploy", "upgrade-deploy", "rollback-deploy")
 DEFAULT_LOG_PATTERNS = (
-    "URL_config.ini 为空",
-    "URL config missing or empty",
     "ModuleNotFoundError",
     "No module named",
     "未检测到 ffmpeg",
@@ -73,6 +73,7 @@ def required_mount_paths(app_root: Path) -> list[Path]:
         app_root / "backup_config",
         app_root / "downloads",
         app_root / "client_data" / "docker-state",
+        app_root / "client_data" / "secrets",
     ]
 
 
@@ -144,22 +145,23 @@ def run_regression(
     try:
         payload = yaml.safe_load(daemon_config.read_text(encoding="utf-8"))
         rooms = payload.get("rooms", []) if isinstance(payload, dict) else []
-        enabled_rooms = [
-            room
-            for room in rooms
-            if isinstance(room, dict) and room.get("enabled", True) and room.get("url")
-        ]
+        config = load_config(
+            daemon_config,
+            validate_storage=False,
+            require_enabled_rooms=False,
+        )
         config_error = ""
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        enabled_rooms = []
+    except (OSError, UnicodeError, yaml.YAMLError, ConfigError) as exc:
+        rooms = []
+        config = None
         config_error = str(exc)
     results.append(
         CheckResult(
             name="daemon_config",
-            ok=bool(enabled_rooms),
+            ok=config is not None,
             detail=(
-                f"{len(enabled_rooms)} enabled daemon room(s)"
-                if enabled_rooms
+                f"{len(rooms)} configured room(s); {len(config.rooms)} enabled"
+                if config is not None
                 else f"missing or invalid: {daemon_config}; {config_error}".rstrip("; ")
             ),
         )

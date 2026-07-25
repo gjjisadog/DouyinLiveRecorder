@@ -68,8 +68,8 @@ class FlyInNasDeployTests(unittest.TestCase):
         self.assertIn("app/docker-compose.flyinnas.yaml", names)
         self.assertIn("app/Dockerfile", names)
         self.assertIn("app/main.py", names)
-        self.assertIn("config_templates/config.ini", names)
-        self.assertIn("config_templates/URL_config.ini", names)
+        self.assertNotIn("config_templates/config.ini", names)
+        self.assertNotIn("config_templates/URL_config.ini", names)
         self.assertIn("config_templates/douyin.yaml", names)
         self.assertNotIn("app/dist/ignore.txt", names)
         self.assertNotIn("app/logs/ignore.log", names)
@@ -93,6 +93,7 @@ class FlyInNasDeployTests(unittest.TestCase):
         self.assertIn('docker compose -f "$APP_ROOT/docker-compose.flyinnas.yaml" up -d --build', script)
         self.assertIn('upsert_env_key "$ENV_FILE" "DLR_IMAGE_TAG" "$EXPECTED_TAG"', script)
         self.assertIn('"$APP_ROOT/config/douyin.yaml"', script)
+        self.assertIn('"$APP_ROOT/client_data/secrets/web_token"', script)
         self.assertIn('"$REMOTE_PYTHON" -m client.infra.docker.flyinnas_regression "$SCENARIO"', script)
 
     def test_deploy_over_ssh_dry_run_returns_commands(self) -> None:

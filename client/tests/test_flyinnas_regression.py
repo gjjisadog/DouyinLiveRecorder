@@ -32,7 +32,14 @@ class FlyInNasRegressionTests(unittest.TestCase):
 
     def prepare_app_root(self) -> Path:
         root = self.make_workspace("tmp_flyinnas_regression")
-        for relative in ("config", "logs", "backup_config", "downloads", "client_data/docker-state"):
+        for relative in (
+            "config",
+            "logs",
+            "backup_config",
+            "downloads",
+            "client_data/docker-state",
+            "client_data/secrets",
+        ):
             (root / relative).mkdir(parents=True, exist_ok=True)
         (root / "config" / "config.ini").write_text("[录制设置]\n", encoding="utf-8")
         (root / "config" / "URL_config.ini").write_text("https://live.douyin.com/123\n", encoding="utf-8")
@@ -74,7 +81,7 @@ class FlyInNasRegressionTests(unittest.TestCase):
         self.assertTrue(report.ok)
         self.assertTrue(all(check.ok for check in report.checks))
 
-    def test_run_regression_fails_when_daemon_config_has_no_rooms(self) -> None:
+    def test_run_regression_accepts_empty_yaml_for_web_hot_add(self) -> None:
         root = self.prepare_app_root()
         (root / "config" / "douyin.yaml").write_text("rooms: []\n", encoding="utf-8")
         compose_file = root / "docker-compose.flyinnas.yaml"
@@ -98,9 +105,10 @@ class FlyInNasRegressionTests(unittest.TestCase):
 
         report = run_regression("first-deploy", app_root=root, runner=runner)
 
-        self.assertFalse(report.ok)
+        self.assertTrue(report.ok)
         config_check = next(check for check in report.checks if check.name == "daemon_config")
-        self.assertFalse(config_check.ok)
+        self.assertTrue(config_check.ok)
+        self.assertIn("0 configured room", config_check.detail)
 
     def test_run_regression_checks_expected_tag_for_upgrade(self) -> None:
         root = self.prepare_app_root()
