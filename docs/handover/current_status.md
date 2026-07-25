@@ -381,4 +381,7 @@
 - 真实 NAS 隔离实例已于 2026-07-25 08:58（Asia/Shanghai）以最终镜像启动在
   `/vol1/docker/douyin-daemon-24h`；首轮检查完成、0 次解析失败、容器 healthy。
   旧 `douyin-live-recorder` 容器仍保持三个月前的 exited 状态，未被覆盖或启动。
+- 09:48 从抖音公开热门页选择并实时解析验证 2 个测试房间，以 SD 画质加入隔离配置；
+  当前共调度 3 个房间，其中 2 个 FFmpeg 正在录制。09:50 心跳显示
+  `active_recordings=2`、解析失败 0、容器 healthy、重启 0。
 - 全仓测试目前为 140 项通过；新增 daemon 定向测试为 34 项通过。
