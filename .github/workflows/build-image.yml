@@ -28,6 +28,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,7 +38,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.lock
       - name: Install runtime and test dependencies
-        run: python -m pip install -r requirements.lock pytest==8.3.5
+        run: python -m pip install -r requirements.lock ".[gui,test]"
       - name: Validate UTF-8 text files
         run: python scripts/check_text_encoding.py
       - name: Run all tests
