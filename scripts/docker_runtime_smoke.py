@@ -229,10 +229,13 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     wait_until(
         "daemon YAML hot reload",
         lambda: (
-            json.loads((root / "state" / "health.json").read_text(encoding="utf-8")).get(
-                "configured_rooms"
-            )
+            (
+                current_state := json.loads(
+                    (root / "state" / "health.json").read_text(encoding="utf-8")
+                )
+            ).get("configured_rooms")
             == 2
+            and bool(current_state.get("config_reloaded_at"))
         ),
     )
     after_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))

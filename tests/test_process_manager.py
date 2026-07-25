@@ -29,6 +29,40 @@ def test_ffmpeg_command_uses_segmented_ts_and_stream_copy(tmp_path: Path) -> Non
     assert str(command[-1]).endswith(".ts")
 
 
+def test_hls_ffmpeg_command_has_hls_reconnect_and_corrupt_tolerance(tmp_path: Path) -> None:
+    command = build_ffmpeg_command(
+        "https://example/live.m3u8",
+        tmp_path / "out_%03d.ts",
+        protocol="hls",
+    )
+    assert ["-reconnect_at_eof", "1"] == command[
+        command.index("-reconnect_at_eof") : command.index("-reconnect_at_eof") + 2
+    ]
+    assert ["-http_persistent", "1"] == command[
+        command.index("-http_persistent") : command.index("-http_persistent") + 2
+    ]
+    assert ["-fflags", "+discardcorrupt"] == command[
+        command.index("-fflags") : command.index("-fflags") + 2
+    ]
+
+
+def test_flv_ffmpeg_command_has_flv_reconnect_and_timeout(tmp_path: Path) -> None:
+    command = build_ffmpeg_command(
+        "https://example/live.flv",
+        tmp_path / "out_%03d.ts",
+        protocol="flv",
+    )
+    assert ["-flv_ignore_prevtag", "1"] == command[
+        command.index("-flv_ignore_prevtag") : command.index("-flv_ignore_prevtag") + 2
+    ]
+    assert ["-reconnect_streamed", "1"] == command[
+        command.index("-reconnect_streamed") : command.index("-reconnect_streamed") + 2
+    ]
+    assert ["-rw_timeout", "30000000"] == command[
+        command.index("-rw_timeout") : command.index("-rw_timeout") + 2
+    ]
+
+
 def test_posix_stop_signals_the_entire_ffmpeg_process_group() -> None:
     process = Mock(spec=subprocess.Popen)
     process.pid = 4321

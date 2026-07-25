@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import shutil
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -16,13 +18,19 @@ from .config import ConfigError, load_config
 class HealthState:
     def __init__(self, state_path: Path) -> None:
         self.path = state_path / "health.json"
-        self._lock = threading.RLock()
+        self._thread_lock = threading.RLock()
+        self._async_lock: asyncio.Lock | None = None
         self.state: dict[str, Any] = {
             "started_at": time.time(),
             "heartbeat_at": 0.0,
             "last_check_at": 0.0,
             "check_failures": 0,
             "ffmpeg_crashes": 0,
+            "ffmpeg_crashes_window": 0,
+            "ffmpeg_crashes_total": 0,
+            "ffmpeg_consecutive_crashes": 0,
+            "ffmpeg_crash_window_seconds": 1800.0,
+            "last_successful_recording_at": 0.0,
             "last_ffmpeg_return_code": None,
             "last_ffmpeg_error": "",
             "last_error_category": "",
@@ -35,15 +43,34 @@ class HealthState:
         }
 
     def update(self, **values: Any) -> None:
-        with self._lock:
+        with self._thread_lock:
             self.state.update(values)
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(self.state, ensure_ascii=False), encoding="utf-8")
-            os.replace(temporary, self.path)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+                dir=self.path.parent,
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as temporary:
+                    json.dump(self.state, temporary, ensure_ascii=False)
+                    temporary.flush()
+                    os.fsync(temporary.fileno())
+                os.replace(temporary_name, self.path)
+            finally:
+                try:
+                    os.unlink(temporary_name)
+                except FileNotFoundError:
+                    pass
+
+    async def update_async(self, **values: Any) -> None:
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+        async with self._async_lock:
+            await asyncio.to_thread(self.update, **values)
 
     def snapshot(self) -> dict[str, Any]:
-        with self._lock:
+        with self._thread_lock:
             return dict(self.state)
 
 
@@ -82,7 +109,8 @@ def check(config_path: Path, state_path: Path | None = None) -> tuple[bool, str]
         return False, "主调度循环心跳超时"
     if now - float(state.get("last_check_at", 0)) > max_age * 2:
         return False, "抖音状态检测长时间未完成"
-    if int(state.get("ffmpeg_crashes", 0)) >= 5:
+    crash_count = int(state.get("ffmpeg_crashes_window", state.get("ffmpeg_crashes", 0)))
+    if crash_count >= 5:
         return False, "FFmpeg 持续崩溃"
     storage_path = Path(
         str(

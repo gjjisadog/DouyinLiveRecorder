@@ -32,9 +32,8 @@
 
 ## 抖音 Docker daemon 后续
 
-1. 完成已启动的真实 NAS 24 小时观察，汇总健康、录制、Cookie/风控分类计数；
-   当前隔离配置共 3 个房间，其中 2 个公开测试房间正在以 SD 画质录制；
-   多房间完整 24 小时检查点为 2026-07-26 09:48（Asia/Shanghai）。
+1. 使用 `scripts/docker_long_run_validate.py --hours 24` 和 `--hours 72` 在真实 NAS
+   上分别跑满时长，保留 JSONL/summary 证据；当前仅提供脚本和短时验收能力。
 2. 在真实 ARMv7 NAS/开发板上补做录制与优雅停止后，再决定是否把实验目标纳入
    正式多架构发布；当前只完成 buildx/QEMU 运行验证。
 3. 观察 NAS 的 remux CPU/IO 后，再决定是否将 `remux_workers` 上调到 2；默认保持关闭。

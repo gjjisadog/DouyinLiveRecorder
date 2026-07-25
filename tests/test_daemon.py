@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
 import threading
 import time
 from unittest.mock import AsyncMock, patch
@@ -87,10 +88,9 @@ storage:
             new=AsyncMock(return_value=resolved),
         ),
     ):
-        _, result = daemon._resolve(daemon.config.rooms[0])
+        _, result = asyncio.run(daemon._resolve(daemon.config.rooms[0]))
     assert result["is_live"] is True
     assert result["room_id"] == "999"
-    daemon.pool.shutdown(wait=True)
     daemon.postprocess.shutdown(wait=True)
 
 
@@ -127,7 +127,6 @@ storage:
     assert daemon.config.rooms[0].quality == "hd"
     assert daemon.config.rooms[0].name == "changed"
     assert daemon.health.snapshot()["config_reload_error"] == ""
-    daemon.pool.shutdown(wait=True)
     daemon.postprocess.shutdown(wait=True)
 
 
@@ -153,7 +152,6 @@ storage:
     assert not daemon.reload_config()
     assert daemon.config is previous
     assert daemon.health.snapshot()["last_error_category"] == "configuration_invalid"
-    daemon.pool.shutdown(wait=True)
     daemon.postprocess.shutdown(wait=True)
 
 
@@ -181,5 +179,4 @@ storage:
 
     stop.assert_called_once_with(["recording-key"])
     assert daemon.config.rooms == ()
-    daemon.pool.shutdown(wait=True)
     daemon.postprocess.shutdown(wait=True)

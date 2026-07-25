@@ -137,6 +137,8 @@ class DockerReleaseTests(unittest.TestCase):
         self.assertIn("docker/metadata-action@v5", content)
         self.assertIn("type=raw,value=edge", content)
         self.assertIn("type=raw,value=latest", content)
+        self.assertIn("publish_target:", content)
+        self.assertIn("type=raw,value=${{ inputs.image_tag }}${{ matrix.suffix }}", content)
         self.assertIn("linux/amd64,linux/arm64", content)
         self.assertIn("sbom: true", content)
         self.assertIn("python -m pytest -v", content)

@@ -34,6 +34,14 @@ Dockerfile 提供共享运行时层和两个明确 target：
 第二套 FFmpeg 状态。daemon 监视 YAML 替换并原子切换不可变 `AppConfig` 快照；
 停用或删除房间时由同一个 `ProcessManager` 收敛对应录制。
 
+daemon 的房间调度运行在单个 `asyncio` 事件循环中。每个房间是独立异步任务，
+维护自己的连续失败计数、指数退避和抖动；解析链共享一个带连接池的
+`httpx.AsyncClient`，退出时统一关闭。录制仍由唯一 `ProcessManager` 管理阻塞式
+FFmpeg 子进程，不复制第二套生命周期逻辑。
+
+`HealthState` 同时保护线程和异步更新，并通过同目录唯一临时文件原子替换状态。
+FFmpeg 健康判定使用滑动时间窗口，同时保留累计崩溃、连续崩溃和最近成功录制时间。
+
 Linux 中 Launcher 子进程与 FFmpeg 使用独立进程组。停止时 Launcher 先拒绝 Web
 写请求，再通知 daemon；daemon 停止新任务并按 SIGINT、terminate、kill 顺序收敛
 FFmpeg，最后等待 Web 和录制线程退出。
