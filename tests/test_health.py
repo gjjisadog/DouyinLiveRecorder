@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 import time
 from pathlib import Path
@@ -56,6 +57,8 @@ def test_health_state_concurrent_thread_and_async_writes_are_atomic(tmp_path: Pa
     assert all(payload[f"thread_{index}"] == index for index in range(20))
     assert all(payload[f"async_{index}"] == index for index in range(20))
     assert not list(health.path.parent.glob(".health.json.*.tmp"))
+    if os.name != "nt":
+        assert health.path.stat().st_mode & 0o777 == 0o644
 
 
 def test_healthcheck_uses_sliding_window_not_lifetime_total(tmp_path: Path) -> None:

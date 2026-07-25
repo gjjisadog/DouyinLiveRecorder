@@ -56,6 +56,7 @@ class HealthState:
                     json.dump(self.state, temporary, ensure_ascii=False)
                     temporary.flush()
                     os.fsync(temporary.fileno())
+                os.chmod(temporary_name, 0o644)
                 os.replace(temporary_name, self.path)
             finally:
                 try:
