@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -57,11 +58,14 @@ class BuildReleaseTests(unittest.TestCase):
         self.assertIn("-m", command)
         self.assertIn("PyInstaller", command)
         self.assertIn("--windowed", command)
-        self.assertIn("--version-file", command)
+        if os.name == "nt":
+            self.assertIn("--version-file", command)
+        else:
+            self.assertNotIn("--version-file", command)
         self.assertIn("--hidden-import", command)
         self.assertIn("PySide6.QtSvg", command)
         self.assertIn(str(paths.entry_script), command)
-        self.assertIn(f"{paths.resources_dir};client/resources", command)
+        self.assertIn(f"{paths.resources_dir}{os.pathsep}client/resources", command)
         self.assertNotIn("--icon", command)
 
     def test_build_pyinstaller_command_uses_icon_when_ico_exists(self) -> None:
@@ -73,8 +77,11 @@ class BuildReleaseTests(unittest.TestCase):
 
         command = build_pyinstaller_command(Path("C:/Python311/python.exe"), paths)
 
-        self.assertIn("--icon", command)
-        self.assertIn(str(paths.icon_ico_path), command)
+        if os.name == "nt":
+            self.assertIn("--icon", command)
+            self.assertIn(str(paths.icon_ico_path), command)
+        else:
+            self.assertNotIn("--icon", command)
 
     def test_discover_additional_binaries_collects_conda_library_bin_dlls(self) -> None:
         root = self.make_workspace("tmp_release_binaries")
@@ -86,7 +93,7 @@ class BuildReleaseTests(unittest.TestCase):
 
         mappings = discover_additional_binaries(python_executable)
 
-        self.assertEqual([f"{dll_path};."], mappings)
+        self.assertEqual([f"{dll_path}{os.pathsep}."], mappings)
 
     def test_write_windows_version_file_creates_target_file(self) -> None:
         root = self.make_workspace("tmp_release_version_file")
