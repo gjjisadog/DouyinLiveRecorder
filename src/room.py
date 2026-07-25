@@ -7,6 +7,7 @@ Date: 2023-07-17 23:52:05
 Update: 2025-02-04 04:57:00
 Copyright (c) 2023 by Hmily, All Rights Reserved.
 """
+import asyncio
 import re
 import urllib.parse
 import execjs
@@ -42,9 +43,11 @@ async def get_xbogus(url: str, headers: dict | None = None) -> str:
     if not headers or 'user-agent' not in (k.lower() for k in headers):
         headers = HEADERS
     query = urllib.parse.urlparse(url).query
-    xbogus = execjs.compile(open(f'{JS_SCRIPT_PATH}/x-bogus.js').read()).call(
-        'sign', query, headers.get("User-Agent", "user-agent"))
-    return xbogus
+    def sign() -> str:
+        return execjs.compile(open(f'{JS_SCRIPT_PATH}/x-bogus.js').read()).call(
+            'sign', query, headers.get("User-Agent", "user-agent"))
+
+    return await asyncio.to_thread(sign)
 
 
 # 获取房间ID和用户secID

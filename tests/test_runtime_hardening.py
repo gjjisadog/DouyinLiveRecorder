@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -12,6 +13,7 @@ from app.douyin_daemon import DouyinDaemon
 from app.models import RoomConfig
 from app.runtime_state import FfmpegCrashTracker, RoomRuntimeState
 from src.http_clients.async_http import async_req, use_async_client
+from src import spider
 
 
 def _daemon(tmp_path: Path, *, rooms: int = 1) -> DouyinDaemon:
@@ -59,6 +61,38 @@ def test_multi_room_checks_run_concurrently(tmp_path: Path) -> None:
     assert completed[0].endswith("/1")
     assert all(state.successes == 1 for state in daemon.room_states.values())
     daemon.postprocess.shutdown(wait=True)
+
+
+def test_douyin_javascript_signing_does_not_block_event_loop() -> None:
+    ticker_completed_at = 0.0
+    started_at = time.monotonic()
+
+    def slow_sign(_query: str, _user_agent: str) -> str:
+        time.sleep(0.2)
+        return "signature"
+
+    async def ticker() -> None:
+        nonlocal ticker_completed_at
+        await asyncio.sleep(0.02)
+        ticker_completed_at = time.monotonic()
+
+    async def exercise() -> None:
+        response = json.dumps({"data": {"data": [], "user": {}}})
+        with (
+            patch("src.spider.ab_sign", side_effect=slow_sign),
+            patch("src.spider.async_req", new=AsyncMock(return_value=response)),
+            patch(
+                "src.spider.get_douyin_app_stream_data",
+                new=AsyncMock(return_value={"anchor_name": ""}),
+            ),
+        ):
+            await asyncio.gather(
+                spider.get_douyin_web_stream_data("https://live.douyin.com/123"),
+                ticker(),
+            )
+
+    asyncio.run(exercise())
+    assert ticker_completed_at - started_at < 0.15
 
 
 def test_shared_http_client_is_reused_without_constructing_fallback() -> None:
