@@ -24,7 +24,7 @@ python -m client.infra.docker.flyinnas_regression rollback-deploy --app-root . -
 
 - 已准备 `config/`、`logs/`、`backup_config/`、`downloads/` 四个挂载目录。
 - `config/URL_config.ini` 已写入至少一个直播间地址。
-- 如需覆盖镜像名或标签，已按 [.env.docker.example](E:\Project\DouyinLiveRecorder-4.0.7\.env.docker.example) 创建 `.env`。
+- 如需覆盖镜像名或标签，已按 [.env.docker.example](./.env.docker.example) 创建 `.env`。
 
 ### 执行
 

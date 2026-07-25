@@ -1,21 +1,32 @@
 services:
   douyin-live-recorder:
-    image: ${DLR_IMAGE_REPOSITORY:-douyin-live-recorder}:${DLR_IMAGE_TAG:-4.0.7}
+    image: ${DLR_IMAGE_REPOSITORY:-ghcr.io/gjjisadog/douyin-live-recorder}:${DLR_NAS_IMAGE_TAG:-4.0.7-nas-web}
     build:
       context: .
       dockerfile: Dockerfile
+      target: nas-web
+      args:
+        VERSION: ${DLR_IMAGE_TAG:-4.0.7}
+        REVISION: ${GIT_REVISION:-local}
+        CREATED: ${BUILD_CREATED:-local}
     container_name: douyin-live-recorder
     environment:
       - TZ=Asia/Shanghai
       - TERM=xterm-256color
       - DLR_HEADLESS=1
+      - DLR_RECORDER_MODE=daemon
       - DLR_WEB_HOST=0.0.0.0
       - DLR_WEB_PORT=${DLR_WEB_PORT:-18091}
+      - DOUYIN_CONFIG=/app/config/douyin.yaml
+      - DOUYIN_COOKIE_FILE=/run/secrets/douyin_cookie
+      - DLR_HEALTHCHECK_TARGET=app.douyin_daemon
+      - DLR_HEALTHCHECK_WEB_URL=http://127.0.0.1:${DLR_WEB_PORT:-18091}/health
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./backup_config:/app/backup_config
-      - ./downloads:/app/downloads
+      - ./downloads:/data/downloads
+      - ./client_data/docker-state:/data/state
     ports:
       - "${DLR_WEB_PORT:-18091}:${DLR_WEB_PORT:-18091}"
     healthcheck:
@@ -23,6 +34,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 90s

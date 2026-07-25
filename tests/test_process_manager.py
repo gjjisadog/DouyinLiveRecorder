@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import shutil
+import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -25,6 +27,30 @@ def test_ffmpeg_command_uses_segmented_ts_and_stream_copy(tmp_path: Path) -> Non
     ]
     assert "-http_proxy" in command
     assert str(command[-1]).endswith(".ts")
+
+
+def test_posix_stop_signals_the_entire_ffmpeg_process_group() -> None:
+    process = Mock(spec=subprocess.Popen)
+    process.pid = 4321
+    process.poll.return_value = None
+    with (
+        patch("app.process_manager.os.name", "posix"),
+        patch("app.process_manager.os.getpgid", return_value=4321, create=True),
+        patch("app.process_manager.os.killpg", create=True) as killpg,
+    ):
+        ProcessManager._send_interrupt(process)
+        ProcessManager._terminate_process_group(process)
+        ProcessManager._kill_process_group(process)
+
+    expected_calls = [
+        call(4321, signal_number)
+        for signal_number in (
+            signal.SIGINT,
+            signal.SIGTERM,
+            getattr(signal, "SIGKILL", getattr(signal, "SIGBREAK", signal.SIGTERM)),
+        )
+    ]
+    assert killpg.call_args_list == expected_calls
 
 
 @pytest.mark.integration

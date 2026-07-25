@@ -6,7 +6,7 @@
 
 - 已安装飞牛云的 Docker / Compose 组件。
 - 仓库文件已上传到飞牛云项目目录。
-- 如需覆盖默认镜像标签或镜像仓库名，已按 [.env.docker.example](E:\Project\DouyinLiveRecorder-4.0.7\.env.docker.example) 创建 `.env`。
+- 如需覆盖默认镜像标签或镜像仓库名，已按 [.env.docker.example](./.env.docker.example) 创建 `.env`。
 - 已准备以下目录并确认有读写权限：
   - `config/`
   - `logs/`

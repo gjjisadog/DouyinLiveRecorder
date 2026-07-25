@@ -1,6 +1,8 @@
 param(
     [string]$Python = "",
-    [string]$Repository = "douyin-live-recorder",
+    [string]$Repository = "ghcr.io/gjjisadog/douyin-live-recorder",
+    [ValidateSet("daemon", "nas-web")]
+    [string]$Target = "daemon",
     [switch]$Push,
     [switch]$DryRun
 )
@@ -22,6 +24,7 @@ $arguments = @(
     "-m", "client.infra.docker.release",
     "buildx",
     "--repository", $Repository,
+    "--target", $Target,
     "--repo-root", $repoRoot
 )
 

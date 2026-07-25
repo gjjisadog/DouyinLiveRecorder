@@ -1,12 +1,12 @@
-![video_spider](https://socialify.git.ci/ihmily/DouyinLiveRecorder/image?font=Inter&forks=1&language=1&owner=1&pattern=Circuit%20Board&stargazers=1&theme=Light)
+![video_spider](https://socialify.git.ci/gjjisadog/DouyinLiveRecorder/image?font=Inter&forks=1&language=1&owner=1&pattern=Circuit%20Board&stargazers=1&theme=Light)
 
 ## 💡简介
 [![Python Version](https://img.shields.io/badge/python-3.11.6-blue.svg)](https://www.python.org/downloads/release/python-3116/)
-[![Supported Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue.svg)](https://github.com/ihmily/DouyinLiveRecorder)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ihmily/douyin-live-recorder?label=Docker%20Pulls&color=blue&logo=docker)](https://hub.docker.com/r/ihmily/douyin-live-recorder/tags)
-![GitHub issues](https://img.shields.io/github/issues/ihmily/DouyinLiveRecorder.svg)
-[![Latest Release](https://img.shields.io/github/v/release/ihmily/DouyinLiveRecorder)](https://github.com/ihmily/DouyinLiveRecorder/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ihmily/DouyinLiveRecorder/total)](https://github.com/ihmily/DouyinLiveRecorder/releases/latest)
+[![Supported Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue.svg)](https://github.com/gjjisadog/DouyinLiveRecorder)
+[![Container Registry](https://img.shields.io/badge/GHCR-douyin--live--recorder-blue?logo=github)](https://github.com/gjjisadog/DouyinLiveRecorder/pkgs/container/douyin-live-recorder)
+![GitHub issues](https://img.shields.io/github/issues/gjjisadog/DouyinLiveRecorder.svg)
+[![Latest Release](https://img.shields.io/github/v/release/gjjisadog/DouyinLiveRecorder)](https://github.com/gjjisadog/DouyinLiveRecorder/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/gjjisadog/DouyinLiveRecorder/total)](https://github.com/gjjisadog/DouyinLiveRecorder/releases/latest)
 
 一款**简易**的可循环值守的直播录制工具，基于FFmpeg实现多平台直播源录制，支持自定义配置录制以及直播状态推送。
 
@@ -308,7 +308,7 @@ https://www.picarto.tv/cuteavalanche
 1.首先拉取或手动下载本仓库项目代码
 
 ```bash
-git clone https://github.com/ihmily/DouyinLiveRecorder.git
+git clone https://github.com/gjjisadog/DouyinLiveRecorder.git
 ```
 
 2.进入项目文件夹，安装依赖
@@ -359,70 +359,70 @@ python main.py
 
 在运行命令之前，请确保您的机器上安装了 [Docker](https://docs.docker.com/get-docker/) 和 [Docker Compose](https://docs.docker.com/compose/install/) 
 
-1.快速启动
+Dockerfile 提供两个明确构建目标，不再共享模糊的默认入口：
 
-最简单方法是直接使用项目中的 [docker-compose.yaml](https://github.com/ihmily/DouyinLiveRecorder/blob/main/docker-compose.yaml) 文件。当前 Compose 默认会构建当前仓库代码，并使用固定版本标签：
+- `daemon`：仅运行 `python -m app.douyin_daemon`，不开放 Web 端口。
+- `nas-web`：运行 `python -m client.infra.docker.launcher`，开放 18091 管理端口，并默认拉起新 daemon。
 
-```bash
-docker compose up -d --build
-```
+1.启动 daemon
 
-Docker 部署默认会同时开启一个轻量配置页，浏览器访问 `http://localhost:18091` 即可直接增删、停用和批量编辑主播列表。
-
-可选先复制 `.env.docker.example` 为 `.env`，覆盖镜像仓库名或版本标签：
+`docker-compose.yaml` 显式构建 `daemon` target：
 
 ```bash
-cp .env.docker.example .env
+docker compose -f docker-compose.yaml up -d --build
 ```
 
-如需修改网页端口，可在 `.env` 中设置：
+2.启动飞牛 NAS Web
+
+`docker-compose.flyinnas.yaml` 显式构建 `nas-web` target。浏览器访问
+`http://NAS_IP:18091`；端口可通过 `.env` 中的 `DLR_WEB_PORT` 修改。
 
 ```bash
-DLR_WEB_PORT=18091
+docker compose -f docker-compose.flyinnas.yaml up -d --build
 ```
 
-2.本地构建镜像(可选)
-
-如果你只想在本地提前构建镜像，也可以直接执行：
+3.本地构建镜像
 
 ```bash
-docker build -t douyin-live-recorder:4.0.7 .
-docker compose up -d
+docker build --target daemon -t dlr-daemon:4.0.7 .
+docker build --target nas-web -t dlr-nas-web:4.0.7 .
 ```
 
-配置页默认同样监听 `18091` 端口；如果宿主机端口冲突，请同步修改 `.env` 里的 `DLR_WEB_PORT`。
+4.GHCR 多架构发布
 
-3.buildx 多架构发布(可选)
-
-仓库内已提供统一的多架构发布入口，镜像标签默认跟随 `client/version.py` 中的版本号：
+默认仓库为 `ghcr.io/gjjisadog/douyin-live-recorder`。发布脚本可分别选择 target：
 
 PowerShell:
 
 ```powershell
-.\build_docker_release.ps1 --repository ihmily/douyin-live-recorder --push
+.\build_docker_release.ps1 -Target daemon -Push
+.\build_docker_release.ps1 -Target nas-web -Push
 ```
 
 批处理:
 
 ```bat
-build_docker_release.bat --repository ihmily/douyin-live-recorder --push
+build_docker_release.bat --target daemon --push
+build_docker_release.bat --target nas-web --push
 ```
 
-也可以直接调用 Python 模块，先预览 buildx 命令：
+也可以先预览 buildx 命令：
 
 ```bash
-python -m client.infra.docker.release buildx --repository ihmily/douyin-live-recorder --push --dry-run
+python -m client.infra.docker.release buildx --target daemon --push --dry-run
 ```
 
-4.停止容器实例
+5.停止容器
 
 ```bash
-docker compose stop
+docker compose -f docker-compose.yaml stop
+docker compose -f docker-compose.flyinnas.yaml stop
 ```
 
+Compose 的停止宽限期至少为 90 秒，Launcher 会依次发送 SIGINT、等待、
+terminate 和 kill，避免 FFmpeg 子进程残留。
 
-
-4.注意事项
+6.注意事项
 
 ①在docker容器内运行本程序之前，请先在配置文件中添加要录制的直播间地址。
 

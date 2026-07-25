@@ -1,6 +1,28 @@
 # 当前状态
 
-最后更新：2026-04-10
+最后更新：2026-07-25
+
+## 2026-07-25 Docker 合并回归第一阶段
+
+- Dockerfile 已拆分为两个显式 target：
+  - `daemon`：CMD 为 `python -m app.douyin_daemon`，Healthcheck 为 `app.health`，
+    不暴露 Web 端口。
+  - `nas-web`：CMD 为 `python -m client.infra.docker.launcher`，Healthcheck 同时
+    检查 Launcher、Web 和子 daemon，开放 18091。
+- 三份 Compose 均显式选择对应 target，录制目录统一为 `/data/downloads`，
+  状态目录统一为 `/data/state`，停止宽限期为 90 秒。
+- NAS Launcher 默认拉起新 daemon；旧 `main.py` 通过
+  `DLR_RECORDER_MODE=legacy` 保留，不删除旧多平台能力；旧入口也已接入
+  SIGTERM 和 FFmpeg 进程组分级停止。
+- Launcher 与 FFmpeg 在 Linux 使用独立进程组，停止顺序为 SIGINT、等待、
+  terminate、等待、kill。
+- CI 已改为运行全量 `python -m pytest -v`、三份 Compose、两个 target 构建、
+  两种 Healthcheck、Web 访问和真实 FFmpeg 停止/TS `ffprobe`。
+- 镜像发布归属改为 `ghcr.io/gjjisadog/douyin-live-recorder`，认证使用
+  `GITHUB_TOKEN`。
+- Draft PR #1 的 head `5e2d4d4` 已是当前 `main` 的祖先，因此该 PR 已被主线
+  取代（superseded）；建议关闭，不再合并到 `legacy-4.0.7-base`。
+- 本阶段没有执行 24/72 小时测试，也没有修改 Windows GUI 或抖音解析算法。
 
 ## 2026-04-05 Docker 配置页
 - Docker / NAS 部署现在会同时启动一个轻量配置网页，用于直接管理 `config/URL_config.ini`。
@@ -23,7 +45,8 @@
   - 先复制 `requirements.docker.txt`
   - 先安装系统依赖 / pip 依赖
   - 最后再复制仓库代码
-- 已成功构建固定镜像标签：`douyin-live-recorder:4.0.7-fnos-webui`
+- 历史上曾构建固定镜像标签 `douyin-live-recorder:4.0.7-fnos-webui`；当前发布
+  标签已改为 `ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web`。
 - 已新增适合飞牛 Docker UI 导入的 Compose 文件：
   - `docker-compose.flyinnas.import.yaml`
 - 该文件特征：

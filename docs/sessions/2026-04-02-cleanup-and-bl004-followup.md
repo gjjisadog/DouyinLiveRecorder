@@ -52,7 +52,7 @@
   - 当前工作目录位于仓库根目录
 - PowerShell 方案：
 ```powershell
-Set-Location 'E:\Project\DouyinLiveRecorder-4.0.7'
+Set-Location '.'
 
 takeown /f .\tmp7qf85p61 /r /d y
 takeown /f .\tmpbape0idz /r /d y
@@ -67,7 +67,7 @@ git status --short --ignored
 ```
 - 如果 PowerShell 中 `icacls` 参数仍然报错，可改用 `cmd` 版本：
 ```cmd
-cd /d E:\Project\DouyinLiveRecorder-4.0.7
+cd /d .
 takeown /f tmp7qf85p61 /r /d y
 takeown /f tmpbape0idz /r /d y
 icacls tmp7qf85p61 /grant %USERNAME%:(OI)(CI)F /t /c

@@ -9,9 +9,11 @@ from pathlib import Path
 
 from client.version import APP_VERSION
 
-DEFAULT_IMAGE_REPOSITORY = "douyin-live-recorder"
-DEFAULT_REMOTE_IMAGE_REPOSITORY = "ihmily/douyin-live-recorder"
+DEFAULT_IMAGE_REPOSITORY = "ghcr.io/gjjisadog/douyin-live-recorder"
+DEFAULT_REMOTE_IMAGE_REPOSITORY = DEFAULT_IMAGE_REPOSITORY
 DEFAULT_PLATFORMS = ("linux/amd64", "linux/arm64")
+DEFAULT_TARGET = "daemon"
+DOCKER_TARGETS = ("daemon", "nas-web")
 
 
 def default_image_tag() -> str:
@@ -36,7 +38,10 @@ def buildx_command(
     platforms: tuple[str, ...] = DEFAULT_PLATFORMS,
     push: bool = False,
     include_latest: bool = True,
+    target: str = DEFAULT_TARGET,
 ) -> list[str]:
+    if target not in DOCKER_TARGETS:
+        raise ValueError(f"Unsupported Docker target: {target}")
     resolved_platforms = platforms if push or len(platforms) <= 1 else (platforms[0],)
     command = [
         "docker",
@@ -46,6 +51,8 @@ def buildx_command(
         ",".join(resolved_platforms),
         "--file",
         str((repo_root / "Dockerfile").resolve()),
+        "--target",
+        target,
     ]
     for tag in docker_tags(repository, include_latest=include_latest):
         command.extend(["--tag", tag])
@@ -108,6 +115,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     buildx_parser.add_argument("--repo-root", default=".")
     buildx_parser.add_argument("--platforms", default=",".join(DEFAULT_PLATFORMS))
     buildx_parser.add_argument("--push", action="store_true")
+    buildx_parser.add_argument("--target", choices=DOCKER_TARGETS, default=DEFAULT_TARGET)
     buildx_parser.add_argument("--dry-run", action="store_true")
     buildx_parser.add_argument("--no-latest", action="store_true")
     buildx_parser.set_defaults(command_name="buildx")
@@ -149,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         platforms=platforms,
         push=args.push,
         include_latest=not args.no_latest,
+        target=args.target,
     )
     print(" ".join(command))
     if not args.dry_run:

@@ -1,0 +1,271 @@
+"""Exercise both Docker targets, healthchecks, Web access and graceful FFmpeg stop."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import tempfile
+import time
+import urllib.request
+import uuid
+from pathlib import Path
+
+
+def run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=check,
+    )
+
+
+def docker_mount(source: Path, target: str, *, readonly: bool = False) -> str:
+    options = f"type=bind,source={source.resolve()},target={target}"
+    if readonly:
+        options += ",readonly"
+    return options
+
+
+def wait_until(label: str, predicate, timeout: float = 45.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            if predicate():
+                return
+        except Exception as exc:  # noqa: BLE001 - surfaced after bounded retries
+            last_error = exc
+        time.sleep(0.5)
+    detail = f": {last_error}" if last_error else ""
+    raise RuntimeError(f"timed out waiting for {label}{detail}")
+
+
+def inspect_json(image: str, template: str) -> object:
+    output = run(["docker", "image", "inspect", "--format", template, image]).stdout.strip()
+    return json.loads(output or "null")
+
+
+def write_config(root: Path) -> None:
+    config = root / "config"
+    config.mkdir(parents=True)
+    (config / "URL_config.ini").write_text("", encoding="utf-8")
+    (config / "douyin.yaml").write_text(
+        """rooms:
+  - url: https://live.douyin.com/123456
+    name: smoke
+    quality: sd
+    enabled: true
+recorder:
+  format: ts
+  segment_seconds: 60
+  poll_seconds: 10
+  max_concurrent_checks: 1
+  stream_protocol: auto
+  remux_to_mp4: false
+  remux_workers: 1
+  delete_source_after_remux: false
+storage:
+  path: /data/downloads
+  state_path: /data/state
+  min_free_gb: 0.1
+proxy:
+  url: ""
+cookie:
+  value: ""
+notifications:
+  enabled: false
+""",
+        encoding="utf-8",
+    )
+    for name in ("downloads", "state", "logs", "backup_config"):
+        path = root / name
+        path.mkdir()
+        if os.name != "nt":
+            path.chmod(0o777)
+
+
+def remove_container(name: str) -> None:
+    run(["docker", "rm", "-f", name], check=False)
+
+
+def smoke_daemon(image: str, root: Path, name: str) -> None:
+    run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--mount",
+            docker_mount(root / "config", "/app/config", readonly=True),
+            "--mount",
+            docker_mount(root / "downloads", "/data/downloads"),
+            "--mount",
+            docker_mount(root / "state", "/data/state"),
+            image,
+        ]
+    )
+    wait_until(
+        "daemon healthcheck",
+        lambda: run(
+            ["docker", "exec", name, "python", "-m", "app.health", "check"],
+            check=False,
+        ).returncode
+        == 0,
+    )
+    ports = json.loads(
+        run(["docker", "inspect", "--format", "{{json .NetworkSettings.Ports}}", name]).stdout
+    )
+    if ports:
+        raise RuntimeError(f"daemon unexpectedly exposes ports: {ports}")
+    run(["docker", "stop", "--time", "90", name])
+    log_result = run(["docker", "logs", name])
+    logs = log_result.stdout + log_result.stderr
+    if "daemon_stopped" not in logs:
+        raise RuntimeError("daemon did not report a graceful stop")
+
+
+def smoke_nas_web(image: str, root: Path, name: str) -> None:
+    run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-p",
+            "127.0.0.1::18091",
+            "--mount",
+            docker_mount(root / "config", "/app/config"),
+            "--mount",
+            docker_mount(root / "downloads", "/data/downloads"),
+            "--mount",
+            docker_mount(root / "state", "/data/state"),
+            "--mount",
+            docker_mount(root / "logs", "/app/logs"),
+            "--mount",
+            docker_mount(root / "backup_config", "/app/backup_config"),
+            image,
+        ]
+    )
+
+    def web_is_ready() -> bool:
+        binding = run(["docker", "port", name, "18091/tcp"]).stdout.strip().splitlines()[0]
+        port = binding.rsplit(":", 1)[1]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+            return response.status == 200 and "Docker" in response.read().decode("utf-8")
+
+    wait_until("NAS Web endpoint", web_is_ready)
+    wait_until(
+        "NAS healthcheck",
+        lambda: run(
+            ["docker", "exec", name, "python", "-m", "client.infra.docker.healthcheck"],
+            check=False,
+        ).returncode
+        == 0,
+    )
+    run(["docker", "stop", "--time", "90", name])
+    log_result = run(["docker", "logs", name])
+    logs = log_result.stdout + log_result.stderr
+    if "recorder stop stage=SIGINT" not in logs or "daemon_stopped" not in logs:
+        raise RuntimeError("NAS launcher did not gracefully stop its daemon child")
+
+
+def smoke_ffmpeg_stop(image: str, root: Path, name: str) -> None:
+    run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--mount",
+            docker_mount(root / "downloads", "/data/downloads"),
+            "--entrypoint",
+            "python",
+            image,
+            "-m",
+            "scripts.docker_ffmpeg_fixture",
+        ]
+    )
+    wait_until("FFmpeg fixture", lambda: (root / "downloads" / "fixture.ready").exists())
+    process_list = run(["docker", "top", name, "-eo", "pid,comm,args"]).stdout
+    if "ffmpeg" not in process_list:
+        raise RuntimeError("FFmpeg fixture process was not running before docker stop")
+    run(["docker", "stop", "--time", "90", name])
+    state = run(["docker", "inspect", "--format", "{{.State.Running}}", name]).stdout.strip()
+    if state != "false":
+        raise RuntimeError("fixture container is still running after docker stop")
+    stopped_processes = run(["docker", "top", name, "-eo", "pid,comm,args"], check=False)
+    if stopped_processes.returncode == 0 and "ffmpeg" in stopped_processes.stdout.lower():
+        raise RuntimeError("FFmpeg process remained after docker stop")
+    media_files = sorted((root / "downloads").glob("fixture_*.ts"))
+    if not media_files:
+        raise RuntimeError("FFmpeg fixture did not produce a TS file")
+    run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--mount",
+            docker_mount(root / "downloads", "/data/downloads", readonly=True),
+            "--entrypoint",
+            "ffprobe",
+            image,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            f"/data/downloads/{media_files[-1].name}",
+        ]
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--daemon-image", required=True)
+    parser.add_argument("--nas-image", required=True)
+    args = parser.parse_args()
+
+    daemon_cmd = inspect_json(args.daemon_image, "{{json .Config.Cmd}}")
+    nas_cmd = inspect_json(args.nas_image, "{{json .Config.Cmd}}")
+    daemon_health = inspect_json(args.daemon_image, "{{json .Config.Healthcheck.Test}}")
+    nas_health = inspect_json(args.nas_image, "{{json .Config.Healthcheck.Test}}")
+    if daemon_cmd != ["python", "-m", "app.douyin_daemon"]:
+        raise RuntimeError(f"unexpected daemon CMD: {daemon_cmd}")
+    if nas_cmd != ["python", "-m", "client.infra.docker.launcher"]:
+        raise RuntimeError(f"unexpected NAS CMD: {nas_cmd}")
+    if daemon_health != ["CMD", "python", "-m", "app.health", "check"]:
+        raise RuntimeError(f"unexpected daemon healthcheck: {daemon_health}")
+    if nas_health != ["CMD", "python", "-m", "client.infra.docker.healthcheck"]:
+        raise RuntimeError(f"unexpected NAS healthcheck: {nas_health}")
+
+    suffix = uuid.uuid4().hex[:8]
+    names = {
+        "daemon": f"dlr-daemon-smoke-{suffix}",
+        "nas": f"dlr-nas-smoke-{suffix}",
+        "ffmpeg": f"dlr-ffmpeg-smoke-{suffix}",
+    }
+    with tempfile.TemporaryDirectory(prefix="dlr-docker-smoke-") as temporary:
+        root = Path(temporary)
+        write_config(root)
+        try:
+            smoke_daemon(args.daemon_image, root, names["daemon"])
+            smoke_nas_web(args.nas_image, root, names["nas"])
+            smoke_ffmpeg_stop(args.daemon_image, root, names["ffmpeg"])
+        finally:
+            for name in names.values():
+                remove_container(name)
+    print("Docker runtime smoke passed: entries, healthchecks, Web, SIGINT stop and ffprobe.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

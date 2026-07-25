@@ -225,7 +225,7 @@ build_client_release.bat
 使用 PowerShell 按 `sha256` 清单逐项校验：
 
 ```powershell
-$dist = 'E:\Project\DouyinLiveRecorder-4.0.7\dist'
+$dist = './dist'
 Get-Content (Join-Path $dist 'DouyinLiveRecorder-Client-4.0.7-windows-x64.sha256') | ForEach-Object {
     $parts = $_ -split ' \\*', 2
     $expected = $parts[0].Trim()

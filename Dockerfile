@@ -1,4 +1,4 @@
-FROM python:3.11.9-slim-bookworm
+FROM python:3.11.9-slim-bookworm AS runtime
 
 ARG VERSION=4.0.7
 ARG REVISION=unknown
@@ -8,12 +8,11 @@ LABEL org.opencontainers.image.title="Douyin Live Recorder" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}" \
-      org.opencontainers.image.source="https://github.com/ihmily/DouyinLiveRecorder"
+      org.opencontainers.image.source="https://github.com/gjjisadog/DouyinLiveRecorder"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    DOUYIN_CONFIG=/app/config/douyin.yaml \
     DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai
 
@@ -49,14 +48,33 @@ COPY --chown=10001:10001 . /app
 
 RUN groupadd --gid 10001 recorder \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin recorder \
-    && mkdir -p /data/downloads /data/state \
+    && mkdir -p /data/downloads /data/state /app/config /app/logs /app/backup_config \
     && chown -R 10001:10001 /data /app
 
 USER 10001:10001
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
+FROM runtime AS daemon
+
+ENV DOUYIN_CONFIG=/app/config/douyin.yaml
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD ["python", "-m", "app.health", "check"]
 
 CMD ["python", "-m", "app.douyin_daemon"]
+
+FROM runtime AS nas-web
+
+ENV DOUYIN_CONFIG=/app/config/douyin.yaml \
+    DLR_RECORDER_MODE=daemon \
+    DLR_WEB_CONFIG_PATH=/app/config/URL_config.ini \
+    DLR_WEB_LOG_DIR=/app/logs \
+    DLR_WEB_HOST=0.0.0.0 \
+    DLR_WEB_PORT=18091 \
+    DLR_HEALTHCHECK_WEB_URL=http://127.0.0.1:18091/health
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["python", "-m", "client.infra.docker.healthcheck"]
+
+CMD ["python", "-m", "client.infra.docker.launcher"]

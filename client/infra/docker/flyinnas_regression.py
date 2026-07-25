@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from client.infra.docker.healthcheck import read_url_entries
+import yaml
 
 DEFAULT_CONTAINER_NAME = "douyin-live-recorder"
 DEFAULT_SCENARIOS = ("first-deploy", "upgrade-deploy", "rollback-deploy")
@@ -72,6 +72,7 @@ def required_mount_paths(app_root: Path) -> list[Path]:
         app_root / "logs",
         app_root / "backup_config",
         app_root / "downloads",
+        app_root / "client_data" / "docker-state",
     ]
 
 
@@ -134,19 +135,33 @@ def run_regression(
     root = app_root.resolve()
     results: list[CheckResult] = []
     compose_file = compose_file_path(root)
-    url_config = root / "config" / "URL_config.ini"
+    daemon_config = root / "config" / "douyin.yaml"
 
     add_path_check(results, compose_file, "compose_file")
-    add_path_check(results, root / "config" / "config.ini", "config_ini")
     for mount_path in required_mount_paths(root):
         add_path_check(results, mount_path, f"mount:{mount_path.name}")
 
-    entries = read_url_entries(url_config)
+    try:
+        payload = yaml.safe_load(daemon_config.read_text(encoding="utf-8"))
+        rooms = payload.get("rooms", []) if isinstance(payload, dict) else []
+        enabled_rooms = [
+            room
+            for room in rooms
+            if isinstance(room, dict) and room.get("enabled", True) and room.get("url")
+        ]
+        config_error = ""
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        enabled_rooms = []
+        config_error = str(exc)
     results.append(
         CheckResult(
-            name="url_config_entries",
-            ok=bool(entries),
-            detail=f"{len(entries)} configured target(s)" if entries else f"missing or empty: {url_config}",
+            name="daemon_config",
+            ok=bool(enabled_rooms),
+            detail=(
+                f"{len(enabled_rooms)} enabled daemon room(s)"
+                if enabled_rooms
+                else f"missing or invalid: {daemon_config}; {config_error}".rstrip("; ")
+            ),
         )
     )
 

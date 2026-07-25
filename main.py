@@ -75,16 +75,68 @@ rstr = r"[\/\\\:\*\？?\"\<\>\|&#.。,， ~！· ]"
 default_path = f'{script_path}/downloads'
 os.makedirs(default_path, exist_ok=True)
 file_update_lock = threading.Lock()
+active_ffmpeg_processes: set[subprocess.Popen] = set()
+active_ffmpeg_lock = threading.RLock()
 os_type = os.name
 clear_command = "cls" if os_type == 'nt' else "clear"
 color_obj = utils.Color()
 os.environ['PATH'] = ffmpeg_path + os.pathsep + current_env_path
 
 
+def register_ffmpeg_process(process: subprocess.Popen) -> None:
+    with active_ffmpeg_lock:
+        active_ffmpeg_processes.add(process)
+
+
+def unregister_ffmpeg_process(process: subprocess.Popen) -> None:
+    with active_ffmpeg_lock:
+        active_ffmpeg_processes.discard(process)
+
+
+def signal_ffmpeg_process(process: subprocess.Popen, sig: int) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        if sig == signal.SIGINT:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        elif sig == signal.SIGTERM:
+            process.terminate()
+        else:
+            process.kill()
+        return
+    os.killpg(os.getpgid(process.pid), sig)
+
+
+def stop_ffmpeg_processes() -> None:
+    with active_ffmpeg_lock:
+        processes = list(active_ffmpeg_processes)
+    kill_signal = getattr(signal, "SIGKILL", getattr(signal, "SIGBREAK", signal.SIGTERM))
+    for sig, timeout in ((signal.SIGINT, 30), (signal.SIGTERM, 30), (kill_signal, 10)):
+        for process in processes:
+            try:
+                signal_ffmpeg_process(process, sig)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + timeout
+        for process in processes:
+            if process.poll() is not None:
+                continue
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                pass
+        if all(process.poll() is not None for process in processes):
+            break
+
+
 def signal_handler(_signal, _frame):
+    global exit_recording
+    exit_recording = True
+    stop_ffmpeg_processes()
     sys.exit(0)
 
 
+signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
@@ -422,8 +474,14 @@ def check_subprocess(record_name: str, record_url: str, ffmpeg_command: list, sa
                      script_command: str | None = None) -> bool:
     save_file_path = ffmpeg_command[-1]
     process = subprocess.Popen(
-        ffmpeg_command, stdin=subprocess.PIPE, stderr=subprocess.STDOUT, startupinfo=get_startup_info(os_type)
+        ffmpeg_command,
+        stdin=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        startupinfo=get_startup_info(os_type),
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+        start_new_session=os.name != "nt",
     )
+    register_ffmpeg_process(process)
 
     subs_file_path = save_file_path.rsplit('.', maxsplit=1)[0]
     subs_thread_name = f'subs_{Path(subs_file_path).name}'
@@ -446,10 +504,12 @@ def check_subprocess(record_name: str, record_url: str, ffmpeg_command: list, sa
             else:
                 process.send_signal(signal.SIGINT)
             process.wait()
+            unregister_ffmpeg_process(process)
             return True
         time.sleep(1)
 
     return_code = process.returncode
+    unregister_ffmpeg_process(process)
     stop_time = time.strftime('%Y-%m-%d %H:%M:%S')
     if return_code == 0:
         if converts_to_mp4 and save_type == 'TS':

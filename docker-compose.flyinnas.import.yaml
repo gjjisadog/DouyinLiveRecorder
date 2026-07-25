@@ -1,18 +1,24 @@
 services:
   douyin-live-recorder:
-    image: douyin-live-recorder:4.0.7-fnos-webui
+    image: ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web
     container_name: douyin-live-recorder
     environment:
       TZ: Asia/Shanghai
       TERM: xterm-256color
       DLR_HEADLESS: "1"
+      DLR_RECORDER_MODE: daemon
       DLR_WEB_HOST: 0.0.0.0
       DLR_WEB_PORT: "18091"
+      DOUYIN_CONFIG: /app/config/douyin.yaml
+      DOUYIN_COOKIE_FILE: /run/secrets/douyin_cookie
+      DLR_HEALTHCHECK_TARGET: app.douyin_daemon
+      DLR_HEALTHCHECK_WEB_URL: http://127.0.0.1:18091/health
     volumes:
       - /vol1/docker/douyin-live-recorder/config:/app/config
       - /vol1/docker/douyin-live-recorder/logs:/app/logs
       - /vol1/docker/douyin-live-recorder/backup_config:/app/backup_config
-      - /vol1/docker/douyin-live-recorder/downloads:/app/downloads
+      - /vol1/docker/douyin-live-recorder/downloads:/data/downloads
+      - /vol1/docker/douyin-live-recorder/state:/data/state
     ports:
       - "18091:18091"
     healthcheck:
@@ -20,6 +26,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 90s

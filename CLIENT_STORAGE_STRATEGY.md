@@ -45,7 +45,7 @@
 
 ## 相关代码
 
-- [storage_strategy.py](E:\Project\DouyinLiveRecorder-4.0.7\client\infra\storage\storage_strategy.py)
-- [sqlite_repo.py](E:\Project\DouyinLiveRecorder-4.0.7\client\infra\storage\sqlite_repo.py)
-- [bootstrap.py](E:\Project\DouyinLiveRecorder-4.0.7\client\bootstrap.py)
-- [app_settings.py](E:\Project\DouyinLiveRecorder-4.0.7\client\app_settings.py)
+- [storage_strategy.py](./client\infra\storage\storage_strategy.py)
+- [sqlite_repo.py](./client\infra\storage\sqlite_repo.py)
+- [bootstrap.py](./client\bootstrap.py)
+- [app_settings.py](./client\app_settings.py)

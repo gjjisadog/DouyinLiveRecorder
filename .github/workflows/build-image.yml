@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: ihmily/douyin-live-recorder
+  IMAGE_NAME: ghcr.io/gjjisadog/douyin-live-recorder
 
 jobs:
   test:
@@ -23,14 +23,23 @@ jobs:
           cache-dependency-path: requirements.lock
       - name: Install runtime and test dependencies
         run: python -m pip install -r requirements.lock pytest==8.3.5
-      - name: Run daemon unit and integration tests
-        run: python -m pytest tests -v
-      - name: Validate Python entrypoints
-        run: python -m py_compile main.py app/*.py
-      - name: Validate Compose
-        run: docker compose config
-      - name: Build Dockerfile smoke image
-        run: docker build -t douyin-recorder:ci .
+      - name: Validate UTF-8 text files
+        run: python scripts/check_text_encoding.py
+      - name: Run all tests
+        run: python -m pytest -v
+      - name: Validate Python sources
+        run: python -m compileall -q app client tests scripts main.py
+      - name: Validate all Compose modes
+        run: |
+          docker compose -f docker-compose.yaml config
+          docker compose -f docker-compose.flyinnas.yaml config
+          docker compose -f docker-compose.flyinnas.import.yaml config
+      - name: Build daemon target
+        run: docker build --target daemon -t dlr-daemon:ci .
+      - name: Build NAS web target
+        run: docker build --target nas-web -t dlr-nas-web:ci .
+      - name: Run Docker health, web and graceful-stop smoke tests
+        run: python scripts/docker_runtime_smoke.py --daemon-image dlr-daemon:ci --nas-image dlr-nas-web:ci
 
   build:
     needs: test
@@ -40,6 +49,14 @@ jobs:
       contents: read
       packages: write
       security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: daemon
+            suffix: ""
+          - target: nas-web
+            suffix: "-nas-web"
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -50,19 +67,21 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-      - name: Log in to Docker Hub
+            type=raw,value=edge${{ matrix.suffix }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}},suffix=${{ matrix.suffix }}
+            type=raw,value=latest${{ matrix.suffix }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push AMD64/ARM64
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
@@ -80,12 +99,13 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: sarif
-          output: trivy-results.sarif
+          output: trivy-${{ matrix.target }}.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-results.sarif
+          sarif_file: trivy-${{ matrix.target }}.sarif
+          category: docker-${{ matrix.target }}
 
   armv7-experimental:
     needs: test
@@ -99,6 +119,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: daemon
           push: false
           platforms: linux/arm/v7
           cache-from: type=gha,scope=armv7

@@ -1,6 +1,15 @@
 # 下一步
 
-最后更新：2026-04-10
+最后更新：2026-07-25
+
+## Docker 合并回归后续
+
+1. 在功能分支 CI 上确认 GHCR 双 target 矩阵发布元数据和 Trivy SARIF 上传。
+2. 在真实飞牛 NAS 上复核 `nas-web` 的目录权限、90 秒停止宽限期和 legacy
+   多平台兼容模式；本阶段只完成本机 Docker Desktop 的真实容器验收。
+3. Draft PR #1 已被 `main` 取代，建议维护者关闭并在关闭原因中引用当前主线。
+4. Web 页仍编辑旧 `URL_config.ini`，而默认 daemon 使用 `douyin.yaml`；在不新增
+   Web 功能的前提下，本阶段仅通过文档明确边界。后续若统一配置模型，应单独立项。
 
 ## Docker 配置页
 1. 如需继续增强 Docker 管理能力，优先在现有 `client.infra.docker.config_web` 上迭代。

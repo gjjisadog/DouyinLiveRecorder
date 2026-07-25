@@ -47,7 +47,7 @@ class DockerHealthcheckTests(unittest.TestCase):
         self.write_cmdline(proc_root, "99", "python", "-m", "client.infra.docker.launcher")
         self.write_cmdline(proc_root, "100", "python", "main.py")
 
-        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
+        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root, recorder_mode="legacy")
 
         self.assertTrue(healthy)
         self.assertIn("waiting for configuration", message)
@@ -61,16 +61,16 @@ class DockerHealthcheckTests(unittest.TestCase):
         (config_dir / "URL_config.ini").write_text("https://live.example.com/a\n", encoding="utf-8-sig")
         self.write_cmdline(proc_root, "99", "python", "-m", "client.infra.docker.launcher")
 
-        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
+        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root, recorder_mode="legacy")
 
         self.assertFalse(healthy)
         self.assertIn("recorder process not running", message)
 
-    def test_is_recorder_process_running_matches_python_main_process(self) -> None:
+    def test_is_recorder_process_running_matches_daemon_module(self) -> None:
         root = self.make_workspace("tmp_docker_healthcheck_process_scan")
         proc_root = root / "proc"
         proc_root.mkdir(parents=True, exist_ok=True)
-        self.write_cmdline(proc_root, "101", "python", "main.py")
+        self.write_cmdline(proc_root, "101", "python", "-m", "app.douyin_daemon")
         self.write_cmdline(proc_root, "102", "python", "other.py")
 
         self.assertTrue(is_recorder_process_running(proc_root))
@@ -93,7 +93,7 @@ class DockerHealthcheckTests(unittest.TestCase):
         (config_dir / "URL_config.ini").write_text("https://live.example.com/a\n", encoding="utf-8-sig")
         self.write_cmdline(proc_root, "200", "python", "main.py")
 
-        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
+        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root, recorder_mode="legacy")
 
         self.assertFalse(healthy)
         self.assertIn("launcher process not running", message)
@@ -108,10 +108,32 @@ class DockerHealthcheckTests(unittest.TestCase):
         self.write_cmdline(proc_root, "199", "python", "-m", "client.infra.docker.launcher")
         self.write_cmdline(proc_root, "200", "python", "main.py")
 
-        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root)
+        healthy, message = run_healthcheck(app_root=root, proc_root=proc_root, recorder_mode="legacy")
 
         self.assertTrue(healthy)
         self.assertIn("recorder healthy", message)
+
+    def test_run_healthcheck_requires_web_and_daemon_health(self) -> None:
+        root = self.make_workspace("tmp_docker_healthcheck_daemon")
+        proc_root = root / "proc"
+        proc_root.mkdir(parents=True, exist_ok=True)
+        config_path = root / "config" / "douyin.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("rooms: []\n", encoding="utf-8")
+        self.write_cmdline(proc_root, "199", "python", "-m", "client.infra.docker.launcher")
+        self.write_cmdline(proc_root, "200", "python", "-m", "app.douyin_daemon")
+
+        healthy, message = run_healthcheck(
+            app_root=root,
+            proc_root=proc_root,
+            daemon_config_path=config_path,
+            web_url="http://127.0.0.1:18091/health",
+            web_checker=lambda _url: (True, "web healthy"),
+            daemon_checker=lambda _path: (True, "healthy"),
+        )
+
+        self.assertTrue(healthy)
+        self.assertIn("launcher, web and daemon healthy", message)
 
 
 if __name__ == "__main__":

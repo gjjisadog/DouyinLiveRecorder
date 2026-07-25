@@ -41,6 +41,10 @@ class FlyInNasDeployTests(unittest.TestCase):
         (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
         (root / "config" / "config.ini").write_text("[录制设置]\n", encoding="utf-8")
         (root / "config" / "URL_config.ini").write_text("https://live.douyin.com/123\n", encoding="utf-8")
+        (root / "config" / "douyin.yaml").write_text(
+            "rooms:\n  - url: https://live.douyin.com/123\n",
+            encoding="utf-8",
+        )
         (root / "dist" / "ignore.txt").write_text("ignore\n", encoding="utf-8")
         (root / "logs" / "ignore.log").write_text("ignore\n", encoding="utf-8")
         (root / ".client-conda-env" / "ignore.txt").write_text("ignore\n", encoding="utf-8")
@@ -66,6 +70,7 @@ class FlyInNasDeployTests(unittest.TestCase):
         self.assertIn("app/main.py", names)
         self.assertIn("config_templates/config.ini", names)
         self.assertIn("config_templates/URL_config.ini", names)
+        self.assertIn("config_templates/douyin.yaml", names)
         self.assertNotIn("app/dist/ignore.txt", names)
         self.assertNotIn("app/logs/ignore.log", names)
         self.assertNotIn("app/.client-conda-env/ignore.txt", names)
@@ -87,6 +92,7 @@ class FlyInNasDeployTests(unittest.TestCase):
 
         self.assertIn('docker compose -f "$APP_ROOT/docker-compose.flyinnas.yaml" up -d --build', script)
         self.assertIn('upsert_env_key "$ENV_FILE" "DLR_IMAGE_TAG" "$EXPECTED_TAG"', script)
+        self.assertIn('"$APP_ROOT/config/douyin.yaml"', script)
         self.assertIn('"$REMOTE_PYTHON" -m client.infra.docker.flyinnas_regression "$SCENARIO"', script)
 
     def test_deploy_over_ssh_dry_run_returns_commands(self) -> None:

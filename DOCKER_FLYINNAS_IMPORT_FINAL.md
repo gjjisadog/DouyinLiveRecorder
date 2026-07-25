@@ -1,117 +1,58 @@
-# 飞牛 Docker UI 导入最终说明
+# 飞牛 Docker UI 导入说明
 
-最后更新：2026-04-10
+最后更新：2026-07-25
 
-## 用途
+## 使用的镜像
 
-这份说明用于飞牛 NAS 的 Docker UI 场景：
+飞牛 NAS Web 模式使用：
 
-- 先导入镜像 tar 包
-- 再把下面的 Compose 直接粘贴到飞牛 Docker UI 的 Compose 导入页
-- 容器启动后即可通过 Web 管理页管理主播列表并查看录制日志
+```text
+ghcr.io/gjjisadog/douyin-live-recorder:4.0.7-nas-web
+```
 
-对应镜像 tar：
-
-- `douyin-live-recorder-4.0.7-fnos-webui.tar`
-
-对应镜像标签：
-
-- `douyin-live-recorder:4.0.7-fnos-webui`
+该镜像来自 Dockerfile 的 `nas-web` target，入口固定为
+`python -m client.infra.docker.launcher`。不要使用 daemon 标签替代。
 
 ## 导入前准备
 
-先在飞牛 NAS 上创建目录：
+创建以下目录，并准备 `config/douyin.yaml`：
 
 ```text
-/vol1/docker/douyin-live-recorder/
 /vol1/docker/douyin-live-recorder/config/
 /vol1/docker/douyin-live-recorder/logs/
 /vol1/docker/douyin-live-recorder/backup_config/
 /vol1/docker/douyin-live-recorder/downloads/
+/vol1/docker/douyin-live-recorder/state/
 ```
 
-如果你的飞牛存储卷不是 `/vol1`，把下面 Compose 里的路径统一替换成你的实际路径。
+如果存储卷不是 `/vol1`，请统一调整挂载源路径。
 
-## 飞牛 UI 可直接粘贴的 Compose
+## 导入
 
-```yaml
-services:
-  douyin-live-recorder:
-    image: douyin-live-recorder:4.0.7-fnos-webui
-    container_name: douyin-live-recorder
-    environment:
-      TZ: Asia/Shanghai
-      TERM: xterm-256color
-      DLR_HEADLESS: "1"
-      DLR_WEB_HOST: 0.0.0.0
-      DLR_WEB_PORT: "18091"
-    volumes:
-      - /vol1/docker/douyin-live-recorder/config:/app/config
-      - /vol1/docker/douyin-live-recorder/logs:/app/logs
-      - /vol1/docker/douyin-live-recorder/backup_config:/app/backup_config
-      - /vol1/docker/douyin-live-recorder/downloads:/app/downloads
-    ports:
-      - "18091:18091"
-    healthcheck:
-      test: ["CMD", "python", "-m", "client.infra.docker.healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    stop_grace_period: 30s
-```
+将仓库中的 `docker-compose.flyinnas.import.yaml` 粘贴到飞牛 Docker UI。该文件：
 
-## 导入步骤
+- 不包含 `build:`。
+- 固定使用 GHCR 的 `nas-web` 镜像标签。
+- 将 18091 映射到 NAS。
+- 将录制目录挂载到 `/data/downloads`，状态目录挂载到 `/data/state`。
+- 使用 `client.infra.docker.healthcheck`。
+- 设置 90 秒停止宽限期。
 
-1. 在飞牛 Docker UI 里导入镜像 `douyin-live-recorder-4.0.7-fnos-webui.tar`
-2. 确认镜像标签显示为 `douyin-live-recorder:4.0.7-fnos-webui`
-3. 打开 Compose 导入
-4. 直接粘贴上面的 Compose
-5. 点击创建 / 启动
-
-## 启动后访问
-
-容器启动后访问：
+启动后访问：
 
 ```text
 http://NAS_IP:18091
-```
-
-首页访问地址：
-
-```text
-http://NAS_IP:18091
-```
-
-日志控制台地址：
-
-```text
 http://NAS_IP:18091/logs
 ```
 
-其中首页可以：
+## 停止检查
 
-- 新增主播直播间
-- 启用 / 停用主播
-- 删除主播
-- 批量编辑 `URL_config.ini`
+停止容器后确认：
 
-日志控制台可以：
+1. 容器日志出现 `recorder stop stage=SIGINT`。
+2. 子 daemon 输出 `daemon_stopped`。
+3. 宿主机没有该容器遗留的 FFmpeg 进程。
 
-- 查看 `streamget.log`
-- 查看 `PlayURL.log`
-- 按 100 / 200 / 500 / 1000 行刷新查看最新日志
-
-## 当前行为说明
-
-- 即使还没有添加任何主播，容器也会保持 `Up`，不会反复重启
-- 没有主播时，健康检查会显示“waiting for configuration”
-- 一旦你在网页里添加了主播，录制主进程会自动拉起
-
-## 建议
-
-- 如果飞牛面板没有立刻显示“链接图标”，先刷新容器列表
-- 确保容器状态为 `运行中`
-- 确保端口映射显示为 `18091:18091`
-- 确保浏览器能直接打开 `http://NAS_IP:18091`
+Web 页仍保留旧 `URL_config.ini` 编辑能力；默认录制子进程已切换到
+`app.douyin_daemon`，其实际录制配置来自 `config/douyin.yaml`。如需旧多平台入口，
+显式设置 `DLR_RECORDER_MODE=legacy`。

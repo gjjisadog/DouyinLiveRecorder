@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+KILL_SIGNAL = getattr(signal, "SIGKILL", getattr(signal, "SIGBREAK", signal.SIGTERM))
+
 
 def build_ffmpeg_command(
     input_url: str,
@@ -100,6 +102,7 @@ class ProcessManager:
                 encoding="utf-8",
                 errors="replace",
                 creationflags=creationflags,
+                start_new_session=os.name != "nt",
             )
             managed = ManagedProcess(key, process, tuple(command))
             self._processes[key] = managed
@@ -135,7 +138,25 @@ class ProcessManager:
         if os.name == "nt":
             process.send_signal(signal.CTRL_BREAK_EVENT)
         else:
-            process.send_signal(signal.SIGINT)
+            os.killpg(os.getpgid(process.pid), signal.SIGINT)
+
+    @staticmethod
+    def _terminate_process_group(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            process.terminate()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+
+    @staticmethod
+    def _kill_process_group(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(os.getpgid(process.pid), KILL_SIGNAL)
 
     def stop_all(self, interrupt_timeout: float = 30.0, terminate_timeout: float = 15.0) -> None:
         with self._lock:
@@ -151,7 +172,7 @@ class ProcessManager:
             try:
                 managed.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                managed.process.kill()
+                self._kill_process_group(managed.process)
 
     @staticmethod
     def _wait_then_escalate(
@@ -163,4 +184,7 @@ class ProcessManager:
             try:
                 managed.process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
-                getattr(managed.process, action)()
+                if action == "terminate":
+                    ProcessManager._terminate_process_group(managed.process)
+                else:
+                    ProcessManager._kill_process_group(managed.process)

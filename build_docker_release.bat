@@ -3,7 +3,8 @@ setlocal
 
 set "REPO_ROOT=%~dp0"
 set "PYTHON=%REPO_ROOT%.client-conda-env\python.exe"
-set "REPOSITORY=douyin-live-recorder"
+set "REPOSITORY=ghcr.io/gjjisadog/douyin-live-recorder"
+set "TARGET=daemon"
 set "PUSH_ARG="
 set "DRY_RUN_ARG="
 
@@ -17,6 +18,12 @@ if /I "%~1"=="--repository" (
 )
 if /I "%~1"=="--push" (
     set "PUSH_ARG=--push"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--target" (
+    set "TARGET=%~2"
+    shift
     shift
     goto parse_args
 )
@@ -35,5 +42,5 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-"%PYTHON%" -m client.infra.docker.release buildx --repository "%REPOSITORY%" --repo-root "%REPO_ROOT%" %PUSH_ARG% %DRY_RUN_ARG%
+"%PYTHON%" -m client.infra.docker.release buildx --repository "%REPOSITORY%" --target "%TARGET%" --repo-root "%REPO_ROOT%" %PUSH_ARG% %DRY_RUN_ARG%
 exit /b %ERRORLEVEL%
