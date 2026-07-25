@@ -2,6 +2,21 @@
 
 最后更新：2026-07-25
 
+## 2026-07-25 daemon 长期运行加固（第三阶段）
+
+- daemon 调度已统一为单个顶层 `asyncio` 事件循环；每个房间独立并发检查，
+  使用独立连续失败计数、指数退避和随机抖动，成功后只重置该房间。
+- 抖音解析链在 daemon 上下文中共享一个带连接池的 `httpx.AsyncClient`，
+  旧多平台入口仍保留独立客户端兼容回退，daemon 退出时关闭共享连接池。
+- `HealthState` 使用线程锁、异步锁、唯一临时文件和原子替换；FFmpeg 健康改为
+  滑动窗口，同时记录累计崩溃、连续崩溃和最近成功录制时间。
+- HLS 与 FLV 使用各自的 FFmpeg 输入容错参数；Linux FFmpeg 继续使用独立进程组，
+  由唯一 `ProcessManager` 按 SIGINT、terminate、kill 收敛。
+- 新增 `scripts/docker_long_run_validate.py` 与操作说明，可执行 24/72 小时采样。
+  本阶段未实际跑满 24/72 小时，不应把短时 Docker 冒烟视为长期通过。
+- 本阶段全仓 161 项测试通过；daemon/nas-web 两个 target 均真实构建并通过
+  Docker 运行烟雾，覆盖 NAS Web、YAML 热加载、无残留 FFmpeg 和 TS `ffprobe`。
+
 ## 2026-07-25 NAS Web 与 daemon 统一
 
 - NAS Launcher 固定启动 `python -m app.douyin_daemon`，已移除 NAS 运行时的

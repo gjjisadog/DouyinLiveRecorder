@@ -20,16 +20,36 @@ def build_ffmpeg_command(
     segment_seconds: int = 1800,
     proxy_url: str = "",
     headers: str = "",
+    protocol: str | None = None,
 ) -> list[str]:
     command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning", "-y"]
     if proxy_url:
         command.extend(["-http_proxy", proxy_url])
     if headers:
         command.extend(["-headers", headers])
+    selected_protocol = (protocol or ("hls" if ".m3u8" in input_url.lower() else "flv")).lower()
     command.extend(
         [
             "-rw_timeout",
             "30000000",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "10",
+        ]
+    )
+    if selected_protocol == "hls":
+        command.extend(["-reconnect_at_eof", "1", "-http_persistent", "1"])
+    elif selected_protocol == "flv":
+        command.extend(["-flv_ignore_prevtag", "1"])
+    command.extend(
+        [
+            "-fflags",
+            "+discardcorrupt",
+            "-err_detect",
+            "ignore_err",
             "-i",
             input_url,
             "-map",

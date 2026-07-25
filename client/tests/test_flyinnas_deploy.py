@@ -82,10 +82,10 @@ class FlyInNasDeployTests(unittest.TestCase):
         ssh_command = build_ssh_command(target, ["echo", "hello"])
 
         self.assertEqual(
-            ["scp", "-P", "2222", "-i", "C:\\keys\\id_ed25519", "bundle.tar.gz", "admin@192.168.1.10:/tmp/bundle.tar.gz"],
+            ["scp", "-P", "2222", "-i", str(target.identity_file), "bundle.tar.gz", "admin@192.168.1.10:/tmp/bundle.tar.gz"],
             scp_command,
         )
-        self.assertEqual(["ssh", "-p", "2222", "-i", "C:\\keys\\id_ed25519", "admin@192.168.1.10", "echo", "hello"], ssh_command)
+        self.assertEqual(["ssh", "-p", "2222", "-i", str(target.identity_file), "admin@192.168.1.10", "echo", "hello"], ssh_command)
 
     def test_render_remote_script_handles_expected_tag_and_regression(self) -> None:
         script = render_remote_script()

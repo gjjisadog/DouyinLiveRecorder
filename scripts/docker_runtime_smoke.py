@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -56,7 +57,8 @@ def inspect_json(image: str, template: str) -> object:
 def write_config(root: Path) -> None:
     config = root / "config"
     config.mkdir(parents=True)
-    (config / "douyin.yaml").write_text(
+    config_file = config / "douyin.yaml"
+    config_file.write_text(
         """rooms:
   - url: https://live.douyin.com/123456
     name: smoke
@@ -84,6 +86,9 @@ notifications:
 """,
         encoding="utf-8",
     )
+    if os.name != "nt":
+        config.chmod(0o777)
+        config_file.chmod(0o666)
     for name in ("downloads", "state", "logs", "backup_config"):
         path = root / name
         path.mkdir()
@@ -99,6 +104,54 @@ notifications:
 
 def remove_container(name: str) -> None:
     run(["docker", "rm", "-f", name], check=False)
+
+
+def container_diagnostics(name: str, root: Path) -> str:
+    reports: list[str] = []
+    for label, command in (
+        ("container logs", ["docker", "logs", "--tail", "200", name]),
+        ("container processes", ["docker", "top", name, "-eo", "pid,comm,args"]),
+        (
+            "container config metadata",
+            [
+                "docker",
+                "exec",
+                name,
+                "python",
+                "-c",
+                (
+                    "import hashlib,pathlib,yaml;"
+                    "p=pathlib.Path('/app/config/douyin.yaml');"
+                    "b=p.read_bytes();d=yaml.safe_load(b) or {};"
+                    "print({'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),"
+                    "'rooms':len(d.get('rooms',[]))})"
+                ),
+            ],
+        ),
+        (
+            "container health",
+            ["docker", "exec", name, "cat", "/data/state/health.json"],
+        ),
+    ):
+        result = run(command, check=False)
+        reports.append(f"{label}:\n{result.stdout}{result.stderr}".rstrip())
+    for label, path in (
+        ("host health", root / "state" / "health.json"),
+    ):
+        try:
+            reports.append(f"{label}:\n{path.read_text(encoding='utf-8')}")
+        except OSError as exc:
+            reports.append(f"{label}: unreadable ({exc})")
+    host_config = root / "config" / "douyin.yaml"
+    try:
+        content = host_config.read_bytes()
+        reports.append(
+            "host config metadata:\n"
+            f"bytes={len(content)} sha256={hashlib.sha256(content).hexdigest()}"
+        )
+    except OSError as exc:
+        reports.append(f"host config metadata: unreadable ({exc})")
+    return "\n\n".join(reports)
 
 
 def smoke_daemon(image: str, root: Path, name: str) -> None:
@@ -199,6 +252,18 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     if unauthenticated.returncode != 0:
         raise RuntimeError("NAS management page did not require authentication")
 
+    wait_until(
+        "initial daemon room check",
+        lambda: (
+            (
+                initial_state := json.loads(
+                    (root / "state" / "health.json").read_text(encoding="utf-8")
+                )
+            ).get("configured_rooms")
+            == 1
+            and float(initial_state.get("last_check_at") or 0) > 0
+        ),
+    )
     before_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     page_request = urllib.request.Request(
@@ -226,15 +291,41 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     )
     with opener.open(add_request, timeout=5) as response:
         response.read()
-    wait_until(
-        "daemon YAML hot reload",
-        lambda: (
-            json.loads((root / "state" / "health.json").read_text(encoding="utf-8")).get(
-                "configured_rooms"
-            )
-            == 2
-        ),
+    persisted_config = run(
+        [
+            "docker",
+            "exec",
+            name,
+            "python",
+            "-c",
+            (
+                "import pathlib,yaml;"
+                "d=yaml.safe_load(pathlib.Path('/app/config/douyin.yaml').read_bytes()) or {};"
+                "raise SystemExit(0 if len(d.get('rooms',[])) == 2 else 1)"
+            ),
+        ],
+        check=False,
     )
+    if persisted_config.returncode != 0:
+        raise RuntimeError(
+            "NAS Web did not persist the added room\n\n"
+            f"{container_diagnostics(name, root)}"
+        )
+    try:
+        wait_until(
+            "daemon YAML hot reload",
+            lambda: (
+                (
+                    current_state := json.loads(
+                        (root / "state" / "health.json").read_text(encoding="utf-8")
+                    )
+                ).get("configured_rooms")
+                == 2
+                and bool(current_state.get("config_reloaded_at"))
+            ),
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}\n\n{container_diagnostics(name, root)}") from exc
     after_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
     if after_state.get("started_at") != before_state.get("started_at"):
         raise RuntimeError("daemon restarted instead of hot-loading YAML")
@@ -343,6 +434,7 @@ def main() -> int:
         write_config(root)
         try:
             smoke_daemon(args.daemon_image, root, names["daemon"])
+            (root / "state" / "health.json").unlink(missing_ok=True)
             smoke_nas_web(args.nas_image, root, names["nas"])
             smoke_ffmpeg_stop(args.nas_image, root, names["ffmpeg"])
         finally:

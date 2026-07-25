@@ -7,12 +7,14 @@ Date: 2023-07-17 23:52:05
 Update: 2025-02-04 04:57:00
 Copyright (c) 2023 by Hmily, All Rights Reserved.
 """
+import asyncio
 import re
 import urllib.parse
 import execjs
 import httpx
 import urllib.request
 from . import JS_SCRIPT_PATH, utils
+from .http_clients.async_http import request_client
 
 no_proxy_handler = urllib.request.ProxyHandler({})
 opener = urllib.request.build_opener(no_proxy_handler)
@@ -41,9 +43,11 @@ async def get_xbogus(url: str, headers: dict | None = None) -> str:
     if not headers or 'user-agent' not in (k.lower() for k in headers):
         headers = HEADERS
     query = urllib.parse.urlparse(url).query
-    xbogus = execjs.compile(open(f'{JS_SCRIPT_PATH}/x-bogus.js').read()).call(
-        'sign', query, headers.get("User-Agent", "user-agent"))
-    return xbogus
+    def sign() -> str:
+        return execjs.compile(open(f'{JS_SCRIPT_PATH}/x-bogus.js').read()).call(
+            'sign', query, headers.get("User-Agent", "user-agent"))
+
+    return await asyncio.to_thread(sign)
 
 
 # 获取房间ID和用户secID
@@ -52,9 +56,8 @@ async def get_sec_user_id(url: str, proxy_addr: str | None = None, headers: dict
         headers = HEADERS
 
     try:
-        proxy_addr = utils.handle_proxy_addr(proxy_addr)
-        async with httpx.AsyncClient(proxy=proxy_addr, timeout=15) as client:
-            response = await client.get(url, headers=headers, follow_redirects=True)
+        async with request_client(proxy_addr, timeout=15) as client:
+            response = await client.get(url, headers=headers, follow_redirects=True, timeout=15)
             redirect_url = response.url
             if 'reflow/' in str(redirect_url):
                 match = re.search(r'sec_user_id=([\w_\-]+)&', str(redirect_url))
@@ -78,15 +81,14 @@ async def get_unique_id(url: str, proxy_addr: str | None = None, headers: dict |
         headers = HEADERS
 
     try:
-        proxy_addr = utils.handle_proxy_addr(proxy_addr)
-        async with httpx.AsyncClient(proxy=proxy_addr, timeout=15) as client:
-            response = await client.get(url, headers=headers, follow_redirects=True)
+        async with request_client(proxy_addr, timeout=15) as client:
+            response = await client.get(url, headers=headers, follow_redirects=True, timeout=15)
             redirect_url = str(response.url)
             if 'reflow/' in str(redirect_url):
                 raise UnsupportedUrlError("Unsupported URL")
             sec_user_id = redirect_url.split('?')[0].rsplit('/', maxsplit=1)[1]
             user_page_response = await client.get(f'https://www.iesdouyin.com/share/user/{sec_user_id}',
-                                                headers=headers, follow_redirects=True)
+                                                headers=headers, follow_redirects=True, timeout=15)
             matches = re.findall(r'unique_id":"(.*?)","verification_type', user_page_response.text)
             if matches:
                 unique_id = matches[-1]
@@ -121,10 +123,8 @@ async def get_live_room_id(room_id: str, sec_user_id: str, proxy_addr: str | Non
     api = api + "&X-Bogus=" + xbogus
 
     try:
-        proxy_addr = utils.handle_proxy_addr(proxy_addr)
-        async with httpx.AsyncClient(proxy=proxy_addr,
-                                     timeout=15) as client:
-            response = await client.get(api, headers=headers)
+        async with request_client(proxy_addr, timeout=15) as client:
+            response = await client.get(api, headers=headers, timeout=15)
             response.raise_for_status()
             json_data = response.json()
             return json_data['data']['room']['owner']['web_rid']

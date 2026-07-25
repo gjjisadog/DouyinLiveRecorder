@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import random
@@ -11,14 +12,15 @@ import signal
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 
-from src import spider, stream
+from src import spider, stream, utils
+from src.http_clients.async_http import use_async_client
 
 from .config import ConfigError, QUALITY_ALIASES, load_config, redact_secret
 from .health import HealthState
@@ -27,6 +29,7 @@ from .models import AppConfig, RoomConfig
 from .observations import ObservationStore, classify_check_failure
 from .postprocess import PostProcessQueue
 from .process_manager import ProcessManager, build_ffmpeg_command
+from .runtime_state import FfmpegCrashTracker, RoomRuntimeState
 
 LOGGER = logging.getLogger("douyin-daemon")
 
@@ -95,20 +98,20 @@ class DouyinDaemon:
         self.config = config
         self.config_path = config_path
         self.shutdown_event = threading.Event()
-        self._wake_event = threading.Event()
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._async_wake: asyncio.Event | None = None
         self.processes = ProcessManager()
         self.health = HealthState(config.storage.state_path)
         self.identities = IdentityCache(config.storage.state_path)
         self.observations = ObservationStore(config.storage.state_path)
-        self.pool = ThreadPoolExecutor(
-            max_workers=config.recorder.max_concurrent_checks,
-            thread_name_prefix="douyin-check",
-        )
         self.record_threads: dict[str, threading.Thread] = {}
         self.recording_room_urls: dict[str, str] = {}
+        self.room_states: dict[str, RoomRuntimeState] = {}
+        self._check_tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = threading.RLock()
         self._config_fingerprint = self._fingerprint_config()
-        self._ffmpeg_crashes = 0
+        self.ffmpeg_health = FfmpegCrashTracker()
+        self.http_client: httpx.AsyncClient | None = None
         self.postprocess = PostProcessQueue(
             self.processes,
             workers=config.recorder.remux_workers,
@@ -120,26 +123,27 @@ class DouyinDaemon:
         if not self.shutdown_event.is_set():
             LOGGER.info("shutdown_requested signal=%s", signum)
             self.shutdown_event.set()
-            self._wake_event.set()
+            self._notify_scheduler()
             self.health.update(stopping=True, heartbeat_at=time.time())
-            threading.Thread(
-                target=self.processes.stop_all,
-                name="ffmpeg-shutdown",
-                daemon=True,
-            ).start()
+
+    def _notify_scheduler(self) -> None:
+        loop = self._event_loop
+        wake = self._async_wake
+        if loop is not None and wake is not None and loop.is_running():
+            loop.call_soon_threadsafe(wake.set)
 
     def _current_config(self) -> AppConfig:
         with self._lock:
             return self.config
 
-    def _fingerprint_config(self) -> tuple[int, int] | None:
+    def _fingerprint_config(self) -> str | None:
         if self.config_path is None:
             return None
         try:
-            stat = self.config_path.stat()
+            content = self.config_path.read_bytes()
         except OSError:
             return None
-        return stat.st_mtime_ns, stat.st_size
+        return hashlib.sha256(content).hexdigest()
 
     def _configured_room_count(self) -> int:
         if self.config_path is None:
@@ -208,16 +212,17 @@ class DouyinDaemon:
                 name="disabled-room-shutdown",
                 daemon=True,
             ).start()
-        self._wake_event.set()
+        self._notify_scheduler()
         return True
 
-    def _watch_config(self) -> None:
-        while not self.shutdown_event.wait(1):
+    async def _watch_config(self) -> None:
+        while not self.shutdown_event.is_set():
+            await asyncio.sleep(1)
             fingerprint = self._fingerprint_config()
             if fingerprint == self._config_fingerprint:
                 continue
             self._config_fingerprint = fingerprint
-            self.reload_config()
+            await asyncio.to_thread(self.reload_config)
 
     def _disk_available(self, config: AppConfig | None = None) -> bool:
         snapshot = config or self._current_config()
@@ -232,36 +237,32 @@ class DouyinDaemon:
             return False
         return True
 
-    def _resolve(
+    async def _resolve(
         self, room: RoomConfig, config: AppConfig | None = None
     ) -> tuple[RoomConfig, dict[str, Any]]:
         snapshot = config or self._current_config()
-
-        async def resolve() -> dict[str, Any]:
-            resolver = (
-                spider.get_douyin_app_stream_data
-                if "v.douyin.com" in room.url or "/user/" in room.url
-                else spider.get_douyin_web_stream_data
-            )
-            data = await resolver(
-                room.url,
-                proxy_addr=snapshot.proxy.url or None,
-                cookies=snapshot.cookie or None,
-            )
-            result = await stream.get_douyin_stream_url(
-                data,
-                QUALITY_ALIASES[room.quality],
-                snapshot.proxy.url or None,
-            )
-            result["room_id"] = data.get("id_str") or data.get("id") or data.get("room_id")
-            result["web_rid"] = data.get("web_rid")
-            identity = resolved_identity(data, result)
-            if identity:
-                result["_identity"] = identity
-                self.identities.remember(room.url, identity)
-            return result
-
-        return room, asyncio.run(resolve())
+        resolver = (
+            spider.get_douyin_app_stream_data
+            if "v.douyin.com" in room.url or "/user/" in room.url
+            else spider.get_douyin_web_stream_data
+        )
+        data = await resolver(
+            room.url,
+            proxy_addr=snapshot.proxy.url or None,
+            cookies=snapshot.cookie or None,
+        )
+        result = await stream.get_douyin_stream_url(
+            data,
+            QUALITY_ALIASES[room.quality],
+            snapshot.proxy.url or None,
+        )
+        result["room_id"] = data.get("id_str") or data.get("id") or data.get("room_id")
+        result["web_rid"] = data.get("web_rid")
+        identity = resolved_identity(data, result)
+        if identity:
+            result["_identity"] = identity
+            self.identities.remember(room.url, identity)
+        return room, result
 
     def _record(
         self,
@@ -283,6 +284,7 @@ class DouyinDaemon:
             output,
             segment_seconds=config.recorder.segment_seconds,
             proxy_url=config.proxy.url,
+            protocol="hls" if ".m3u8" in stream_url.lower() else "flv",
         )
         try:
             managed = self.processes.start(key, command)
@@ -294,13 +296,17 @@ class DouyinDaemon:
                 stopping=self.shutdown_event.is_set(),
                 disk_available=self._disk_available(config),
             )
-            if reason == "ffmpeg_crash":
-                self._ffmpeg_crashes += 1
+            with self._lock:
+                if reason == "ffmpeg_crash":
+                    self.ffmpeg_health.record_crash()
+                elif reason == "stream_ended":
+                    self.ffmpeg_health.record_success()
+                crash_state = self.ffmpeg_health.snapshot()
             self.health.update(
                 last_ffmpeg_return_code=return_code,
                 last_ffmpeg_error=_redact_error(managed.errors[-1] if managed.errors else ""),
                 last_error_category=reason,
-                ffmpeg_crashes=self._ffmpeg_crashes,
+                **crash_state,
             )
             LOGGER.info("recording_stopped room=%s code=%s reason=%s", key, return_code, reason)
             if (
@@ -311,7 +317,10 @@ class DouyinDaemon:
                 for source in sorted(output_dir.glob(f"{anchor}_{stamp}_*.ts")):
                     self.postprocess.submit(source)
         except Exception:
-            self._ffmpeg_crashes += 1
+            with self._lock:
+                self.ffmpeg_health.record_crash()
+                crash_state = self.ffmpeg_health.snapshot()
+            self.health.update(last_error_category="ffmpeg_crash", **crash_state)
             LOGGER.exception("recording_failed room=%s", key)
         finally:
             with self._lock:
@@ -350,7 +359,124 @@ class DouyinDaemon:
             self.recording_room_urls[key] = room.url
             thread.start()
 
-    def run(self) -> int:
+    def _sync_room_states(self, rooms: tuple[RoomConfig, ...]) -> None:
+        urls = {room.url for room in rooms}
+        for url in urls:
+            self.room_states.setdefault(url, RoomRuntimeState(url=url))
+        for url in set(self.room_states) - urls:
+            self.room_states.pop(url, None)
+            task = self._check_tasks.pop(url, None)
+            if task is not None:
+                task.cancel()
+
+    def _scheduler_metrics(self) -> dict[str, Any]:
+        states = tuple(self.room_states.values())
+        checks = sum(state.checks for state in states)
+        successes = sum(state.successes for state in states)
+        return {
+            "room_checks_total": checks,
+            "room_check_successes": successes,
+            "room_check_failures": checks - successes,
+            "check_failures": checks - successes,
+            "room_check_success_rate": round(successes / checks, 6) if checks else 0.0,
+            "rooms_in_backoff": sum(state.consecutive_failures > 0 for state in states),
+            "last_check_at": max((state.last_check_at for state in states), default=time.time()),
+        }
+
+    async def _check_room(
+        self,
+        room: RoomConfig,
+        config: AppConfig,
+        semaphore: asyncio.Semaphore,
+    ) -> None:
+        state = self.room_states.setdefault(room.url, RoomRuntimeState(url=room.url))
+        try:
+            async with semaphore:
+                resolved_room, result = await asyncio.wait_for(
+                    self._resolve(room, config),
+                    timeout=45,
+                )
+            if room.url not in {item.url for item in self._current_config().rooms}:
+                return
+            self._handle_check_result(resolved_room, result, config)
+            state.record_success(now=time.time(), poll_seconds=config.recorder.poll_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            category = classify_check_failure(str(exc))
+            fingerprint = self.observations.record(category, exc)
+            delay = retry_delay(state.consecutive_failures)
+            state.record_failure(now=time.time(), category=category, delay=delay)
+            LOGGER.error(
+                "room_check_failed category=%s error_type=%s fingerprint=%s retry_seconds=%.2f",
+                category,
+                type(exc).__name__,
+                fingerprint,
+                delay,
+            )
+            await self.health.update_async(last_error_category=category)
+        finally:
+            await self.health.update_async(
+                heartbeat_at=time.time(),
+                check_failure_categories=self.observations.counters,
+                active_recordings=len(self.processes.active_keys()),
+                configured_rooms=self._configured_room_count(),
+                **self._scheduler_metrics(),
+            )
+
+    async def _scheduler(self) -> None:
+        semaphore = asyncio.Semaphore(self._current_config().recorder.max_concurrent_checks)
+        while not self.shutdown_event.is_set():
+            config = self._current_config()
+            if not await asyncio.to_thread(self._disk_available, config):
+                self.request_shutdown()
+                break
+            rooms = self.identities.deduplicate(config.rooms)
+            self._sync_room_states(rooms)
+            now = time.time()
+            for room in rooms:
+                state = self.room_states[room.url]
+                current = self._check_tasks.get(room.url)
+                if current is not None and not current.done():
+                    continue
+                if current is not None:
+                    self._check_tasks.pop(room.url, None)
+                if state.next_check_at <= now:
+                    self._check_tasks[room.url] = asyncio.create_task(
+                        self._check_room(room, config, semaphore),
+                        name=f"check-{_safe_name(room.url)}",
+                    )
+            await self.health.update_async(
+                heartbeat_at=time.time(),
+                active_recordings=len(self.processes.active_keys()),
+                configured_rooms=self._configured_room_count(),
+                **self._scheduler_metrics(),
+            )
+            wake = self._async_wake
+            if wake is None:
+                await asyncio.sleep(0.5)
+                continue
+            try:
+                await asyncio.wait_for(wake.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+            wake.clear()
+
+    def _make_http_client(self) -> httpx.AsyncClient:
+        config = self._current_config()
+        return httpx.AsyncClient(
+            proxy=utils.handle_proxy_addr(config.proxy.url or None),
+            timeout=httpx.Timeout(30.0, connect=15.0),
+            limits=httpx.Limits(
+                max_connections=max(8, config.recorder.max_concurrent_checks * 4),
+                max_keepalive_connections=max(4, config.recorder.max_concurrent_checks * 2),
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+            http2=True,
+        )
+
+    async def run_async(self) -> int:
         LOGGER.info(
             "daemon_started rooms=%d poll_seconds=%d cookie=%s",
             len(self._current_config().rooms),
@@ -369,68 +495,45 @@ class DouyinDaemon:
             min_free_gb=self._current_config().storage.min_free_gb,
             stopping=False,
         )
-        watcher = None
+        self._event_loop = asyncio.get_running_loop()
+        self._async_wake = asyncio.Event()
+        self.http_client = self._make_http_client()
+        watcher: asyncio.Task[None] | None = None
         if self.config_path is not None:
-            watcher = threading.Thread(
-                target=self._watch_config,
+            watcher = asyncio.create_task(
+                self._watch_config(),
                 name="douyin-config-watcher",
-                daemon=True,
             )
-            watcher.start()
-        failures = 0
-        while not self.shutdown_event.is_set():
-            config = self._current_config()
-            if not self._disk_available(config):
-                self.request_shutdown()
-                break
-            rooms = self.identities.deduplicate(config.rooms)
-            futures = [self.pool.submit(self._resolve, room, config) for room in rooms]
-            completed = 0
-            for future in futures:
-                if self.shutdown_event.is_set():
-                    break
-                try:
-                    room, result = future.result(timeout=45)
-                    self._handle_check_result(room, result, config)
-                    completed += 1
-                except Exception as exc:
-                    failures += 1
-                    category = classify_check_failure(str(exc))
-                    fingerprint = self.observations.record(category, exc)
-                    LOGGER.error(
-                        "room_check_failed category=%s error_type=%s fingerprint=%s",
-                        category,
-                        type(exc).__name__,
-                        fingerprint,
-                    )
-                    self.health.update(last_error_category=category)
-            now = time.time()
-            self.health.update(
-                heartbeat_at=now,
-                last_check_at=now,
-                check_failures=failures,
-                check_failure_categories=self.observations.counters,
-                ffmpeg_crashes=self._ffmpeg_crashes,
-                active_recordings=len(self.processes.active_keys()),
-                configured_rooms=self._configured_room_count(),
+        try:
+            with use_async_client(self.http_client):
+                await self._scheduler()
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+            for task in self._check_tasks.values():
+                task.cancel()
+            pending = list(self._check_tasks.values())
+            if watcher is not None:
+                pending.append(watcher)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.to_thread(self.processes.stop_all)
+            for thread in list(self.record_threads.values()):
+                await asyncio.to_thread(thread.join, 60)
+            await asyncio.to_thread(self.postprocess.shutdown, True)
+            await self.http_client.aclose()
+            self.http_client = None
+            await self.health.update_async(
+                heartbeat_at=time.time(),
+                active_recordings=0,
+                stopping=True,
+                **self.ffmpeg_health.snapshot(),
             )
-            delay = config.recorder.poll_seconds if completed or not rooms else retry_delay(min(failures, 6))
-            self._wake_event.wait(delay)
-            self._wake_event.clear()
-        self.pool.shutdown(wait=True, cancel_futures=True)
-        self.processes.stop_all()
-        for thread in list(self.record_threads.values()):
-            thread.join(timeout=60)
-        self.postprocess.shutdown(wait=True)
-        if watcher is not None:
-            watcher.join(timeout=2)
-        self.health.update(
-            heartbeat_at=time.time(),
-            active_recordings=0,
-            stopping=True,
-        )
-        LOGGER.info("daemon_stopped")
+            LOGGER.info("daemon_stopped")
         return 0
+
+    def run(self) -> int:
+        return asyncio.run(self.run_async())
 
 
 def main(argv: list[str] | None = None) -> int:

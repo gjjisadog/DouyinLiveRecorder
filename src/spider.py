@@ -9,6 +9,7 @@ Copyright (c) 2023-2025 by Hmily, All Rights Reserved.
 Function: Get live stream data.
 """
 
+import asyncio
 import hashlib
 import logging
 import random
@@ -185,7 +186,11 @@ async def get_douyin_web_stream_data(url: str, proxy_addr: OptionalStr = None, c
         }
 
         api = f'https://live.douyin.com/webcast/room/web/enter/?{urllib.parse.urlencode(params)}'
-        a_bogus = ab_sign(urllib.parse.urlparse(api).query, headers['user-agent'])
+        a_bogus = await asyncio.to_thread(
+            ab_sign,
+            urllib.parse.urlparse(api).query,
+            headers['user-agent'],
+        )
         api += "&a_bogus=" + a_bogus
         json_str = await async_req(url=api, proxy_addr=proxy_addr, headers=headers)
         json_data = json.loads(json_str)['data']
