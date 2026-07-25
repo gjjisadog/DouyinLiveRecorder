@@ -20,7 +20,10 @@ from src import spider, stream
 
 from .config import ConfigError, QUALITY_ALIASES, load_config, redact_secret
 from .health import HealthState
+from .identity_cache import IdentityCache, resolved_identity
 from .models import AppConfig, RoomConfig
+from .observations import ObservationStore, classify_check_failure
+from .postprocess import PostProcessQueue
 from .process_manager import ProcessManager, build_ffmpeg_command
 
 LOGGER = logging.getLogger("douyin-daemon")
@@ -91,6 +94,8 @@ class DouyinDaemon:
         self.shutdown_event = threading.Event()
         self.processes = ProcessManager()
         self.health = HealthState(config.storage.state_path)
+        self.identities = IdentityCache(config.storage.state_path)
+        self.observations = ObservationStore(config.storage.state_path)
         self.pool = ThreadPoolExecutor(
             max_workers=config.recorder.max_concurrent_checks,
             thread_name_prefix="douyin-check",
@@ -98,6 +103,12 @@ class DouyinDaemon:
         self.record_threads: dict[str, threading.Thread] = {}
         self._lock = threading.RLock()
         self._ffmpeg_crashes = 0
+        self.postprocess = PostProcessQueue(
+            self.processes,
+            workers=config.recorder.remux_workers,
+            delete_source=config.recorder.delete_source_after_remux,
+            stopping=self.shutdown_event,
+        )
 
     def request_shutdown(self, signum: int | None = None) -> None:
         if not self.shutdown_event.is_set():
@@ -140,6 +151,10 @@ class DouyinDaemon:
             )
             result["room_id"] = data.get("id_str") or data.get("id") or data.get("room_id")
             result["web_rid"] = data.get("web_rid")
+            identity = resolved_identity(data, result)
+            if identity:
+                result["_identity"] = identity
+                self.identities.remember(room.url, identity)
             return result
 
         return room, asyncio.run(resolve())
@@ -177,6 +192,13 @@ class DouyinDaemon:
                 ffmpeg_crashes=self._ffmpeg_crashes,
             )
             LOGGER.info("recording_stopped room=%s code=%s reason=%s", key, return_code, reason)
+            if (
+                self.config.recorder.remux_to_mp4
+                and not self.shutdown_event.is_set()
+                and reason == "stream_ended"
+            ):
+                for source in sorted(output_dir.glob(f"{anchor}_{stamp}_*.ts")):
+                    self.postprocess.submit(source)
         except Exception:
             self._ffmpeg_crashes += 1
             LOGGER.exception("recording_failed room=%s", key)
@@ -186,6 +208,9 @@ class DouyinDaemon:
 
     @staticmethod
     def _room_key(room: RoomConfig, result: dict[str, Any]) -> str:
+        identity = result.get("_identity")
+        if identity:
+            return str(identity)
         room_id = result.get("room_id") or result.get("web_rid")
         anchor = result.get("anchor_name")
         return str(room_id or anchor or room.url)
@@ -223,7 +248,8 @@ class DouyinDaemon:
             if not self._disk_available():
                 self.request_shutdown()
                 break
-            futures = [self.pool.submit(self._resolve, room) for room in self.config.rooms]
+            rooms = self.identities.deduplicate(self.config.rooms)
+            futures = [self.pool.submit(self._resolve, room) for room in rooms]
             completed = 0
             for future in futures:
                 if self.shutdown_event.is_set():
@@ -232,14 +258,22 @@ class DouyinDaemon:
                     room, result = future.result(timeout=45)
                     self._handle_check_result(room, result)
                     completed += 1
-                except Exception:
+                except Exception as exc:
                     failures += 1
-                    LOGGER.exception("room_check_failed")
+                    category = classify_check_failure(str(exc))
+                    fingerprint = self.observations.record(category, exc)
+                    LOGGER.error(
+                        "room_check_failed category=%s error_type=%s fingerprint=%s",
+                        category,
+                        type(exc).__name__,
+                        fingerprint,
+                    )
             now = time.time()
             self.health.update(
                 heartbeat_at=now,
                 last_check_at=now if completed else self.health.state["last_check_at"],
                 check_failures=failures,
+                check_failure_categories=self.observations.counters,
                 ffmpeg_crashes=self._ffmpeg_crashes,
                 active_recordings=len(self.processes.active_keys()),
             )
@@ -249,6 +283,7 @@ class DouyinDaemon:
         self.processes.stop_all()
         for thread in list(self.record_threads.values()):
             thread.join(timeout=60)
+        self.postprocess.shutdown(wait=True)
         self.health.update(
             heartbeat_at=time.time(),
             active_recordings=0,

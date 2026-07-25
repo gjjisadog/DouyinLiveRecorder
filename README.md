@@ -639,11 +639,28 @@ TTY 或 `input()`；原有 `python main.py` 多平台源码入口保持不变。
 
 复制 `config/douyin.example.yaml` 为 `config/douyin.yaml`，然后修改
 `rooms`。支持直播间地址、主播主页地址和抖音短链接；解析后会按房间或
-主播标识去重。
+主播标识去重。解析成功后的稳定主播标识会持久化到
+`state/room_identities.json`，短链接重定向变化不会在后续轮询中造成重复检查。
 
 默认策略是 TS、每 1800 秒分段、直接封装 `-c copy`、不转 MP4、不删除
 源文件。TS 在网络中断或容器停止时比 MP4 更容易保留可播放的尾部；
 自动转 MP4 会额外占用 CPU、磁盘和后处理时间，因此 daemon 默认不做。
+如确有播放器兼容需求，可设置 `recorder.remux_to_mp4: true`；
+`remux_workers` 限制并发数（1–4），`delete_source_after_remux` 决定成功后
+是否删除 TS。建议 NAS 从 1 个 worker 起步，并保留 TS。
+
+旧版配置可在容器内迁移，Cookie 会单独写入 Secret 文件，不进入 YAML：
+
+```bash
+python -m app.migrate_legacy \
+  --url-config config/URL_config.ini \
+  --legacy-config config/config.ini \
+  --output-config config/douyin.yaml \
+  --output-cookie secrets/douyin_cookie
+```
+
+若在容器内以 root 迁移，额外传入 `--cookie-uid 10001`，生成的 Secret 会归
+录制用户所有并保持 `0400`，避免非 root daemon 无法读取。
 
 ### 2. 配置 Cookie Secret
 
@@ -676,11 +693,15 @@ docker compose stop
 代理通过 `proxy.url` 设置。健康检查关注
 调度心跳、最近检测、目录可写性、剩余磁盘和 FFmpeg 连续崩溃，不会把
 单个主播未开播判为故障。
+解析错误会按 Cookie 失效、风控、网络和其他解析错误分类，脱敏、限量保存到
+状态卷的 `error_observations.json`，便于长期观察且不会写入 Cookie 或完整 URL。
 
 收到 SIGTERM/SIGINT 后，daemon 会停止新检查和新录制，向全部 FFmpeg
 发送 SIGINT 并等待文件尾写入；超时后才依次 terminate 和 kill。
 Compose 为此保留 90 秒停止宽限期。
 
-发布镜像支持 `linux/amd64` 和 `linux/arm64`。主分支发布 `edge`；
+发布镜像正式支持 `linux/amd64` 和 `linux/arm64`。`linux/arm/v7` 已通过
+buildx/QEMU 下的完整镜像构建及 FFmpeg、Node、Python/ExecJS 运行验证，
+但暂作为 CI 中允许失败的实验目标，不进入正式多架构标签。主分支发布 `edge`；
 正式 `v*` Release 才发布版本标签和 `latest`。升级前应备份配置与下载
 目录，拉取固定版本标签，重新创建容器并检查健康状态。

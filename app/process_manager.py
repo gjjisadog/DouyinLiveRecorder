@@ -48,6 +48,28 @@ def build_ffmpeg_command(
     return command
 
 
+def build_remux_command(source: Path, destination: Path) -> list[str]:
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        str(destination),
+    ]
+
+
 @dataclass
 class ManagedProcess:
     key: str

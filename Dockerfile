@@ -19,8 +19,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
         nodejs \
@@ -32,8 +33,17 @@ RUN apt-get update \
 
 ENV DLR_DISABLE_FILE_LOGS=1
 
+ARG TARGETARCH
 COPY requirements.lock /app/requirements.lock
-RUN python -m pip install --no-cache-dir -r /app/requirements.lock
+RUN if [ "$TARGETARCH" = "arm" ]; then \
+        apt-get -o Acquire::Retries=5 update \
+        && apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential; \
+    fi \
+    && python -m pip install --no-cache-dir -r /app/requirements.lock \
+    && if [ "$TARGETARCH" = "arm" ]; then \
+        apt-get purge -y --auto-remove build-essential; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --chown=10001:10001 . /app
 

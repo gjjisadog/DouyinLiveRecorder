@@ -19,6 +19,9 @@ class RecorderConfig:
     poll_seconds: int = 120
     max_concurrent_checks: int = 3
     stream_protocol: str = "auto"
+    remux_to_mp4: bool = False
+    remux_workers: int = 1
+    delete_source_after_remux: bool = False
 
 
 @dataclass(frozen=True)

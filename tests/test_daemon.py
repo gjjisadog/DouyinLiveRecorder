@@ -88,3 +88,4 @@ storage:
     assert result["is_live"] is True
     assert result["room_id"] == "999"
     daemon.pool.shutdown(wait=True)
+    daemon.postprocess.shutdown(wait=True)

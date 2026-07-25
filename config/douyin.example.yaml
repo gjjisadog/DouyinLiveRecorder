@@ -10,6 +10,9 @@ recorder:
   poll_seconds: 120
   max_concurrent_checks: 3
   stream_protocol: auto
+  remux_to_mp4: false
+  remux_workers: 1
+  delete_source_after_remux: false
 
 storage:
   path: /data/downloads

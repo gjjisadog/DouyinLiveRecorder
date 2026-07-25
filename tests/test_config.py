@@ -97,3 +97,24 @@ def test_cookie_rejects_multiline_header_injection() -> None:
     with pytest.raises(ConfigError, match="格式异常"):
         load_cookie("", {"DOUYIN_COOKIE": "ttwid=ok\nAuthorization: bad"})
 
+
+def test_remux_configuration_is_typed_and_bounded(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path / "remux.yaml",
+        f"""
+rooms:
+  - url: https://live.douyin.com/123
+recorder:
+  remux_to_mp4: true
+  remux_workers: 2
+  delete_source_after_remux: false
+storage:
+  path: {tmp_path.as_posix()}/downloads
+  state_path: {tmp_path.as_posix()}/state
+  min_free_gb: 0.1
+""",
+    )
+    config = load_config(config_path)
+    assert config.recorder.remux_to_mp4 is True
+    assert config.recorder.remux_workers == 2
+    assert config.recorder.delete_source_after_remux is False

@@ -182,6 +182,15 @@ def load_config(path: str | Path, *, validate_storage: bool = True) -> AppConfig
             recorder.get("max_concurrent_checks"), "recorder.max_concurrent_checks", 3, 1, 32
         ),
         stream_protocol=protocol,
+        remux_to_mp4=_bool(recorder.get("remux_to_mp4"), "recorder.remux_to_mp4", False),
+        remux_workers=_int_range(
+            recorder.get("remux_workers"), "recorder.remux_workers", 1, 1, 4
+        ),
+        delete_source_after_remux=_bool(
+            recorder.get("delete_source_after_remux"),
+            "recorder.delete_source_after_remux",
+            False,
+        ),
     )
 
     storage = _mapping(root.get("storage"), "storage")

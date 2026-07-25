@@ -367,3 +367,18 @@
 - Docker 默认改为非 root 用户、只读根文件系统、Tini、TS 分段和 90 秒停止宽限期。
 - HTTP 客户端恢复 TLS 证书校验默认开启；仓库内抖音/抖音国际版长 Cookie 已清空。
 - 新增本地 FFmpeg 中断与 `ffprobe` 验证测试。
+
+## 2026-07-25 daemon 长期运行增强
+
+- 短链接和主页解析后的稳定主播标识会原子持久化，并在后续轮询中跨 URL 去重。
+- 新增默认关闭的 MP4 remux 队列，支持 1–4 个 worker，使用流复制且仅在成功后
+  可选删除 TS。
+- 新增旧 INI 到 YAML + Cookie Secret 的迁移入口。
+- 状态卷会保存脱敏、限量的解析失败分类样本，覆盖 Cookie 失效、风控、网络和
+  其他解析错误。
+- ARMv7 镜像已在 buildx/QEMU 下完整构建，容器内确认 `armv7l`、FFmpeg 5.1.9、
+  Node 18.20.4 与 ExecJS/daemon 导入正常；CI 新增允许失败的实验构建，不发布标签。
+- 真实 NAS 隔离实例已于 2026-07-25 08:58（Asia/Shanghai）以最终镜像启动在
+  `/vol1/docker/douyin-daemon-24h`；首轮检查完成、0 次解析失败、容器 healthy。
+  旧 `douyin-live-recorder` 容器仍保持三个月前的 exited 状态，未被覆盖或启动。
+- 全仓测试目前为 140 项通过；新增 daemon 定向测试为 34 项通过。
