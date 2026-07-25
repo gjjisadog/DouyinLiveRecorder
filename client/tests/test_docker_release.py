@@ -139,6 +139,8 @@ class DockerReleaseTests(unittest.TestCase):
         self.assertIn("type=raw,value=latest", content)
         self.assertIn("publish_target:", content)
         self.assertIn("type=raw,value=${{ inputs.image_tag }}${{ matrix.suffix }}", content)
+        self.assertIn('tags: ["v*", "nas-web-v*"]', content)
+        self.assertIn("type=match,pattern=nas-web-v(.*)", content)
         self.assertIn("linux/amd64,linux/arm64", content)
         self.assertIn("sbom: true", content)
         self.assertIn("python -m pytest -v", content)
