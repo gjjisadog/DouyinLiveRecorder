@@ -434,6 +434,7 @@ def main() -> int:
         write_config(root)
         try:
             smoke_daemon(args.daemon_image, root, names["daemon"])
+            (root / "state" / "health.json").unlink(missing_ok=True)
             smoke_nas_web(args.nas_image, root, names["nas"])
             smoke_ffmpeg_stop(args.nas_image, root, names["ffmpeg"])
         finally:
