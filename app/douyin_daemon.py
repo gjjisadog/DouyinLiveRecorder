@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import random
@@ -135,14 +136,14 @@ class DouyinDaemon:
         with self._lock:
             return self.config
 
-    def _fingerprint_config(self) -> tuple[int, int] | None:
+    def _fingerprint_config(self) -> str | None:
         if self.config_path is None:
             return None
         try:
-            stat = self.config_path.stat()
+            content = self.config_path.read_bytes()
         except OSError:
             return None
-        return stat.st_mtime_ns, stat.st_size
+        return hashlib.sha256(content).hexdigest()
 
     def _configured_room_count(self) -> int:
         if self.config_path is None:

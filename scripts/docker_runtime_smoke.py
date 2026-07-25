@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -99,6 +100,54 @@ notifications:
 
 def remove_container(name: str) -> None:
     run(["docker", "rm", "-f", name], check=False)
+
+
+def container_diagnostics(name: str, root: Path) -> str:
+    reports: list[str] = []
+    for label, command in (
+        ("container logs", ["docker", "logs", "--tail", "200", name]),
+        ("container processes", ["docker", "top", name, "-eo", "pid,comm,args"]),
+        (
+            "container config metadata",
+            [
+                "docker",
+                "exec",
+                name,
+                "python",
+                "-c",
+                (
+                    "import hashlib,pathlib,yaml;"
+                    "p=pathlib.Path('/app/config/douyin.yaml');"
+                    "b=p.read_bytes();d=yaml.safe_load(b) or {};"
+                    "print({'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),"
+                    "'rooms':len(d.get('rooms',[]))})"
+                ),
+            ],
+        ),
+        (
+            "container health",
+            ["docker", "exec", name, "cat", "/data/state/health.json"],
+        ),
+    ):
+        result = run(command, check=False)
+        reports.append(f"{label}:\n{result.stdout}{result.stderr}".rstrip())
+    for label, path in (
+        ("host health", root / "state" / "health.json"),
+    ):
+        try:
+            reports.append(f"{label}:\n{path.read_text(encoding='utf-8')}")
+        except OSError as exc:
+            reports.append(f"{label}: unreadable ({exc})")
+    host_config = root / "config" / "douyin.yaml"
+    try:
+        content = host_config.read_bytes()
+        reports.append(
+            "host config metadata:\n"
+            f"bytes={len(content)} sha256={hashlib.sha256(content).hexdigest()}"
+        )
+    except OSError as exc:
+        reports.append(f"host config metadata: unreadable ({exc})")
+    return "\n\n".join(reports)
 
 
 def smoke_daemon(image: str, root: Path, name: str) -> None:
@@ -226,18 +275,21 @@ def smoke_nas_web(image: str, root: Path, name: str) -> None:
     )
     with opener.open(add_request, timeout=5) as response:
         response.read()
-    wait_until(
-        "daemon YAML hot reload",
-        lambda: (
-            (
-                current_state := json.loads(
-                    (root / "state" / "health.json").read_text(encoding="utf-8")
-                )
-            ).get("configured_rooms")
-            == 2
-            and bool(current_state.get("config_reloaded_at"))
-        ),
-    )
+    try:
+        wait_until(
+            "daemon YAML hot reload",
+            lambda: (
+                (
+                    current_state := json.loads(
+                        (root / "state" / "health.json").read_text(encoding="utf-8")
+                    )
+                ).get("configured_rooms")
+                == 2
+                and bool(current_state.get("config_reloaded_at"))
+            ),
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}\n\n{container_diagnostics(name, root)}") from exc
     after_state = json.loads((root / "state" / "health.json").read_text(encoding="utf-8"))
     if after_state.get("started_at") != before_state.get("started_at"):
         raise RuntimeError("daemon restarted instead of hot-loading YAML")

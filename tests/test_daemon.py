@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import asyncio
+import os
 import threading
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -127,6 +128,39 @@ storage:
     assert daemon.config.rooms[0].quality == "hd"
     assert daemon.config.rooms[0].name == "changed"
     assert daemon.health.snapshot()["config_reload_error"] == ""
+    daemon.postprocess.shutdown(wait=True)
+
+
+def test_config_fingerprint_detects_same_size_same_mtime_content_change(
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "douyin.yaml"
+    config_file.write_text(
+        f"""rooms:
+  - url: https://live.douyin.com/123
+storage:
+  path: {tmp_path.as_posix()}/downloads
+  state_path: {tmp_path.as_posix()}/state
+  min_free_gb: 0.1
+""",
+        encoding="utf-8",
+    )
+    daemon = DouyinDaemon(load_config(config_file), config_path=config_file)
+    original_fingerprint = daemon._fingerprint_config()
+    original_stat = config_file.stat()
+
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8").replace("/123", "/456"),
+        encoding="utf-8",
+    )
+    os.utime(
+        config_file,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+
+    assert config_file.stat().st_size == original_stat.st_size
+    assert config_file.stat().st_mtime_ns == original_stat.st_mtime_ns
+    assert daemon._fingerprint_config() != original_fingerprint
     daemon.postprocess.shutdown(wait=True)
 
 
